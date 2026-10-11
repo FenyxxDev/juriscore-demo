@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { RouterProvider } from 'react-router';
 import { ToastProvider } from './components/ui';
 import { StoreProvider, useStore } from './store';
@@ -8,10 +8,15 @@ import { rel, type Advogado, type Perfil } from './data';
 
 function SessionBootstrap() {
   const { dispatch, advogados } = useStore();
+  const started = useRef(false);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || started.current) return;
+    started.current = true;
+    let cancelled = false;
+
     void supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return;
       const supaUser = data.session?.user;
       const email = supaUser?.email?.toLowerCase();
       const conta = email ? advogados.find((a) => a.email.toLowerCase() === email) : undefined;
@@ -43,7 +48,16 @@ function SessionBootstrap() {
       dispatch({ type: 'register', usuario });
       dispatch({ type: 'login', userId: usuario.id, lembrar: true });
     });
-  }, [advogados, dispatch]);
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') dispatch({ type: 'logout' });
+    });
+
+    return () => {
+      cancelled = true;
+      listener.subscription.unsubscribe();
+    };
+  }, [dispatch]);
 
   return null;
 }
