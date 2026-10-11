@@ -1,1 +1,1 @@
-{"routes":[{"path":"/","title":"Login"},{"path":"/dashboard","title":"Dashboard"}]}
+{"routes":[{"path":"/","title":"Login"},{"path":"/cadastro","title":"Cadastro"},{"path":"/dashboard","title":"Dashboard"}]}
