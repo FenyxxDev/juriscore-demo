@@ -1,5 +1,4 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
 import { Plus, Users } from 'lucide-react';
 import {
   Button,
@@ -26,7 +25,6 @@ export function Clientes() {
   const [loadingClients, setLoadingClients] = useState(true);
   const podeCriar = can('cadastrarCliente');
   const toast = useToast();
-  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [tipo, setTipo] = useState('todos');
   const [comProc, setComProc] = useState('todos');
@@ -182,13 +180,7 @@ export function Clientes() {
                 </thead>
                 <tbody>
                   {rows.map((c) => (
-                    <tr
-                      key={c.id}
-                      onClick={() => navigate(`/clientes/${c.id}`)}
-                      tabIndex={0}
-                      onKeyDown={(e) => e.key === 'Enter' && navigate(`/clientes/${c.id}`)}
-                      className="cursor-pointer border-t border-line hover:bg-slate-50/70 focus:bg-slate-50"
-                    >
+                    <tr key={c.id} className="border-t border-line">
                       <td className="px-5 py-3.5">
                         <span className="font-medium text-ink">{c.nome}</span>
                         <span className="block text-[13px] text-muted">{c.documento}</span>
