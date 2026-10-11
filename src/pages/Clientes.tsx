@@ -1,4 +1,4 @@
-import { type FormEvent, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Plus, Users } from 'lucide-react';
 import {
@@ -14,13 +14,16 @@ import {
   StatusBadge,
   useToast,
 } from '../components/ui';
-import { AREAS } from '../data';
+import { AREAS, type Cliente } from '../data';
 import { useStore } from '../store';
+import { supabase } from '../lib/supabase';
 
 const PER_PAGE = 6;
 
 export function Clientes() {
-  const { clientes, processos, dispatch, can } = useStore();
+  const { processos, can } = useStore();
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [loadingClients, setLoadingClients] = useState(true);
   const podeCriar = can('cadastrarCliente');
   const toast = useToast();
   const navigate = useNavigate();
@@ -31,6 +34,28 @@ export function Clientes() {
   const [adv, setAdv] = useState('todos');
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function loadClients() {
+      if (!supabase) {
+        setLoadingClients(false);
+        return;
+      }
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData.user?.id;
+      if (!userId) { setLoadingClients(false); return; }
+      const { data: profile, error } = await supabase
+        .from('profiles').select('data').eq('id', userId).maybeSingle();
+      if (active && !error) {
+        const stored = (profile?.data as { clients?: Cliente[] } | null)?.clients ?? [];
+        setClientes(stored);
+      }
+      if (active) setLoadingClients(false);
+    }
+    void loadClients();
+    return () => { active = false; };
+  }, []);
 
   const countFor = (id: string) => processos.filter((p) => p.clienteId === id).length;
 
@@ -117,7 +142,9 @@ export function Clientes() {
           )}
         </div>
 
-        {rows.length === 0 ? (
+        {loadingClients ? (
+          <p className="px-5 py-10 text-center text-[13px] text-muted">Carregando clientes...</p>
+        ) : rows.length === 0 ? (
           <EmptyState
             icon={<Users size={26} />}
             title={clientes.length === 0 ? 'Você ainda não possui clientes cadastrados.' : 'Nenhum cliente encontrado.'}
@@ -190,8 +217,24 @@ export function Clientes() {
       <NovoClienteModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onSave={(cliente) => {
-          dispatch({ type: 'addCliente', cliente });
+        onSave={async (cliente) => {
+          if (!supabase) {
+            toast({ tone: 'error', message: 'Supabase não está configurado.' });
+            return;
+          }
+          const { data: authData } = await supabase.auth.getUser();
+          const userId = authData.user?.id;
+          if (!userId) { toast({ tone: 'error', message: 'Sessão expirada. Entre novamente.' }); return; }
+          const { data: profile, error: readError } = await supabase.from('profiles').select('data').eq('id', userId).maybeSingle();
+          const profileData = (profile?.data as Record<string, unknown> | null) ?? {};
+          const stored = (profileData.clients as Cliente[] | undefined) ?? clientes;
+          const next: Cliente = { id: crypto.randomUUID(), nome: cliente.nome, tipo: cliente.tipo, documento: cliente.documento, status: 'ativo', atualizacao: new Date().toLocaleDateString('pt-BR') };
+          const { error } = await supabase.from('profiles').upsert({ id: userId, data: { ...profileData, clients: [next, ...stored] } });
+          if (error || readError) {
+            toast({ tone: 'error', message: error?.message ?? readError?.message ?? 'Não foi possível salvar o cliente.' });
+            return;
+          }
+          setClientes((current) => [next, ...current]);
           setModalOpen(false);
           toast({ tone: 'success', message: `Cliente "${cliente.nome}" cadastrado.` });
         }}

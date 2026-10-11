@@ -2,7 +2,7 @@ import { Navigate, createBrowserRouter } from 'react-router';
 import { AppLayout } from './components/AppLayout';
 import { Login } from './pages/Login';
 import { Cadastro } from './pages/Cadastro';
-import { Dashboard } from './pages/Dashboard';
+import { Clientes } from './pages/Clientes';
 
 export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
@@ -10,7 +10,8 @@ export const router = createBrowserRouter([
   {
     element: <AppLayout />,
     children: [
-      { path: '/dashboard', element: <Dashboard /> },
+      { path: '/clientes', element: <Clientes /> },
+      { path: '/dashboard', element: <Navigate to="/clientes" replace /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

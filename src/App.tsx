@@ -15,7 +15,7 @@ function SessionBootstrap() {
     started.current = true;
     let cancelled = false;
 
-    void supabase.auth.getSession().then(({ data }) => {
+    void supabase.auth.getSession().then(async ({ data }) => {
       if (cancelled) return;
       const supaUser = data.session?.user;
       const email = supaUser?.email?.toLowerCase();
@@ -26,6 +26,11 @@ function SessionBootstrap() {
       }
       if (!supaUser || !email) return;
       const meta = supaUser.user_metadata ?? {};
+      const { data: existingProfile } = await supabase.from('profiles').select('data').eq('id', supaUser.id).maybeSingle();
+      await supabase.from('profiles').upsert({
+        id: supaUser.id,
+        data: { ...((existingProfile?.data as Record<string, unknown> | null) ?? {}), ...meta, email },
+      });
       const perfil: Perfil = meta.perfil === 'Administrador' || meta.perfil === 'Assistente' ? meta.perfil : 'Advogado';
       const usuario: Advogado = {
         id: supaUser.id,

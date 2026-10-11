@@ -9,7 +9,6 @@ import {
   ChevronRight,
   FileText,
   Gavel,
-  LayoutDashboard,
   ListChecks,
   LogOut,
   Scale,
@@ -28,7 +27,7 @@ import { supabase } from '../lib/supabase';
 type NavItem = { to: string; label: string; icon: typeof Bell; roles?: Perfil[] };
 
 const navGroups: { heading: string; items: NavItem[] }[] = [
-  { heading: 'Demonstração', items: [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard }] },
+  { heading: 'Gestão', items: [{ to: '/clientes', label: 'Clientes', icon: Users }] },
 ];
 
 function SidebarItem({ to, label, Icon }: { to: string; label: string; Icon: typeof Bell }) {

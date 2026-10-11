@@ -172,7 +172,7 @@ export function Cadastro() {
       dispatch({ type: 'register', usuario: { ...usuario, id: data.user.id } });
       dispatch({ type: 'login', userId: data.user.id, lembrar: true });
       toast({ tone: 'success', message: 'Conta criada. Bem-vindo ao JurisCore.' });
-      navigate('/dashboard');
+      navigate('/clientes');
     } else {
       toast({ tone: 'success', message: 'Conta criada. Confirme o seu e-mail para entrar.' });
       navigate('/');
