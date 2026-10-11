@@ -32,7 +32,7 @@ function SessionBootstrap() {
         nome: meta.nome || email.split('@')[0],
         email,
         senha: '',
-        telefone: meta.telefone || '',
+        telefone: meta.telefone || meta.phone || '',
         perfil,
         ativo: true,
         oab: meta.oab || '',

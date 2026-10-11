@@ -117,12 +117,14 @@ export function Cadastro() {
     setLoading(true);
     const perfil = f.perfil as Perfil;
     const oabNum = f.oab.replace(/\D/g, '');
+    const telefone = f.telefone.trim();
+    const telefoneNumeros = telefone.replace(/\D/g, '');
     const usuario: Advogado = {
       id: uid('adv'),
       nome: f.nome.trim(),
       email: f.email.trim().toLowerCase(),
       senha: '',
-      telefone: f.telefone,
+      telefone,
       perfil,
       ativo: true,
       oab: perfil === 'Advogado' ? `OAB/${f.oabUf} ${oabNum.replace(/(\d)(?=(\d{3})+$)/, '$1.')}` : '',
@@ -142,7 +144,10 @@ export function Cadastro() {
       options: {
         data: {
           nome: usuario.nome,
-          telefone: usuario.telefone,
+          // O telefone fica persistido em auth.users.raw_user_meta_data.
+          // Mantemos as duas formas para facilitar leitura e validação futura.
+          telefone,
+          phone: telefoneNumeros,
           perfil: usuario.perfil,
           oab: usuario.oab,
           oabUf: usuario.oabUf,
