@@ -1,0 +1,166 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Core identity — deep navy + petroleum, neutral slate/off-white */
+  --color-navy: #0a1a29;
+  --color-navy-700: #10273b;
+  --color-navy-600: #1a3550;
+
+  --color-brand: #16455a; /* petroleum, used for chips/emphasis */
+  --color-brand-dark: #0a1a29; /* deep navy — sidebar, dark surfaces */
+
+  --color-teal: #185a63; /* primary interactive (petroleum) */
+  --color-teal-hover: #124349;
+
+  --color-accent: #b08442; /* single sophisticated accent — used sparingly */
+
+  --color-ink: #0e1f2d;
+  --color-muted: #566370;
+  --color-faint: #8794a1;
+  --color-line: #e6e8ec;
+  --color-line-strong: #d3d8df;
+  --color-canvas: #f4f5f7;
+  --color-panel: #ffffff;
+  --color-subtle: #fafbfc;
+
+  /* Status — desaturated, discrete */
+  --color-info: #35566e;
+  --color-success: #3d6b52;
+  --color-warning: #8a5a1c;
+  --color-danger: #9a3b38;
+
+  --radius: 6px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv05', 'ss01';
+}
+
+/* Tabular figures for data-dense tables and metrics */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Monospace legal identifiers (CNJ numbers, OAB, CPF/CNPJ) */
+.ident {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Small structural label — uppercase eyebrow */
+.eyebrow {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-faint);
+}
+
+/* Visible keyboard focus (WCAG 2.2) — only for keyboard users */
+:focus-visible {
+  outline: 2px solid var(--color-teal);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Hide scrollbars until scrolling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: #c2cad3 transparent;
+}
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*:hover::-webkit-scrollbar-thumb {
+  background: #c2cad3;
+  background-clip: padding-box;
+}
+
+@keyframes juris-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes juris-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes juris-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes juris-drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes juris-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.juris-dot-typing span {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-teal);
+  animation: juris-pulse 1s ease-in-out infinite;
+}
+.juris-dot-typing span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.juris-dot-typing span:nth-child(3) {
+  animation-delay: 0.3s;
+}

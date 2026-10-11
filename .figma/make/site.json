@@ -1,0 +1,11 @@
+{
+  "title": "JURISCORE",
+  "description": "This web application streamlines project management by providing intuitive dashboards and essential tools for teams to collaborate effectively and track progress.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
