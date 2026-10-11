@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router';
+import { Navigate, useNavigate } from 'react-router';
 import { ArrowRight, Eye, EyeOff, Scale } from 'lucide-react';
 import { Alert, Button, Checkbox, Field, Input, Modal, useToast } from '../components/ui';
 import { useStore } from '../store';
@@ -108,36 +108,28 @@ export function Login() {
     if (!EMAIL_RE.test(email.trim()) || !senha) return;
     setLoading(true);
 
-    if (supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: senha });
-      if (error || !data.user) {
-        setLoading(false);
-        return setErro('credenciais');
-      }
-      const conta = advogados.find((a) => a.email.toLowerCase() === data.user.email?.toLowerCase());
-      if (!conta) {
-        setLoading(false);
-        return setErro('credenciais');
-      }
-      if (!conta.ativo) {
-        setLoading(false);
-        return setErro('inativo');
-      }
-      dispatch({ type: 'login', userId: conta.id, lembrar });
+    if (!supabase) {
       setLoading(false);
-      navigate('/dashboard');
-      return;
+      return setErro('credenciais');
     }
 
-    // Fallback local apenas para a pré-visualização quando as variáveis não foram configuradas.
-    setTimeout(() => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: senha });
+    if (error || !data.user) {
       setLoading(false);
-      const conta = advogados.find((a) => a.email.toLowerCase() === email.trim().toLowerCase());
-      if (!conta || conta.senha !== senha) return setErro('credenciais');
-      if (!conta.ativo) return setErro('inativo');
-      dispatch({ type: 'login', userId: conta.id, lembrar });
-      navigate('/dashboard');
-    }, 700);
+      return setErro('credenciais');
+    }
+    const conta = advogados.find((a) => a.email.toLowerCase() === data.user.email?.toLowerCase());
+    if (!conta) {
+      setLoading(false);
+      return setErro('credenciais');
+    }
+    if (!conta.ativo) {
+      setLoading(false);
+      return setErro('inativo');
+    }
+    dispatch({ type: 'login', userId: conta.id, lembrar });
+    setLoading(false);
+    navigate('/dashboard');
   }
 
   return (
@@ -170,13 +162,8 @@ export function Login() {
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-[13px] text-muted">
-        Não possui uma conta?{' '}
-        <Link to="/cadastro" className="font-medium text-[var(--color-teal)] hover:underline">Cadastre-se</Link>
-      </p>
-
       <p className="mt-10 border-t border-line pt-4 text-center text-[11.5px] leading-relaxed text-[var(--color-faint)]">
-        {supabaseConfigured ? 'Acesso protegido pelo Supabase.' : <>Demonstração · <span className="ident">mariana.silva</span>, <span className="ident">ana.costa</span> ou <span className="ident">bruno.tavares</span> @juriscore.com.br · senha <span className="ident">juriscore</span></>}
+        {supabaseConfigured ? 'Acesso protegido pelo Supabase.' : 'Configure o Supabase para ativar o acesso.'}
       </p>
 
       {recuperar && <RecuperarSenha
