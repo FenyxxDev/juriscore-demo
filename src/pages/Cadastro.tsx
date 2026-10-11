@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
-import { ArrowLeft, ArrowRight, Briefcase, Scale, UserCog } from 'lucide-react';
-import { Button, Field, Input, Select, cx, useToast } from '../components/ui';
+import { ArrowLeft, ArrowRight, Briefcase, Mail, Scale, UserCog } from 'lucide-react';
+import { Button, Field, Input, Modal, Select, cx, useToast } from '../components/ui';
 import { AreaPicker } from '../components/Areas';
 import { AuthShell, EMAIL_RE, PasswordInput } from './Login';
 import { type Advogado, type Perfil, UFS, rel } from '../data';
@@ -54,6 +54,7 @@ export function Cadastro() {
   const toast = useToast();
   const [etapa, setEtapa] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [emailPopupOpen, setEmailPopupOpen] = useState(false);
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [f, setF] = useState({
     nome: '', email: '', telefone: '', senha: '', confirmar: '',
@@ -175,17 +176,18 @@ export function Cadastro() {
       navigate('/clientes');
     } else {
       toast({ tone: 'success', message: 'Conta criada. Confirme o seu e-mail para entrar.' });
-      navigate('/');
+      setEmailPopupOpen(true);
     }
   }
 
   return (
-    <AuthShell>
-      <h2 className="text-[26px] font-semibold tracking-tight text-ink">
-        {etapa === 0 ? 'Crie sua conta' : etapa === 1 ? 'Qual é o seu perfil?' : PERFIL_OPCOES.find((p) => p.id === f.perfil)?.label}
-      </h2>
+    <>
+      <AuthShell>
+        <h2 className="text-[26px] font-semibold tracking-tight text-ink">
+          {etapa === 0 ? 'Crie sua conta' : etapa === 1 ? 'Qual é o seu perfil?' : PERFIL_OPCOES.find((p) => p.id === f.perfil)?.label}
+        </h2>
 
-      <ol className="mt-4 flex gap-2" aria-label="Etapas do cadastro">
+        <ol className="mt-4 flex gap-2" aria-label="Etapas do cadastro">
         {ETAPAS.map((e, i) => (
           <li key={e} className="flex-1">
             <span className={cx('block h-0.5 rounded-full', i <= etapa ? 'bg-[var(--color-teal)]' : 'bg-slate-200')} />
@@ -194,9 +196,9 @@ export function Cadastro() {
             </span>
           </li>
         ))}
-      </ol>
+        </ol>
 
-      <form onSubmit={onSubmit} noValidate className="mt-6 flex flex-col gap-4">
+        <form onSubmit={onSubmit} noValidate className="mt-6 flex flex-col gap-4">
         {etapa === 0 && (
           <>
             <Field label="Nome completo" htmlFor="c-nome" error={errs.nome} required>
@@ -313,12 +315,41 @@ export function Cadastro() {
             {etapa < 2 ? 'Continuar' : 'Criar conta'}
           </Button>
         </div>
-      </form>
+        </form>
 
-      <p className="mt-6 text-center text-[13px] text-muted">
-        Já possui uma conta?{' '}
-        <Link to="/" className="font-medium text-[var(--color-teal)] hover:underline">Entrar</Link>
-      </p>
-    </AuthShell>
+        <p className="mt-6 text-center text-[13px] text-muted">
+          Já possui uma conta?{' '}
+          <Link to="/" className="font-medium text-[var(--color-teal)] hover:underline">Entrar</Link>
+        </p>
+      </AuthShell>
+
+      <Modal
+        open={emailPopupOpen}
+        onClose={() => { setEmailPopupOpen(false); navigate('/'); }}
+        title="Confirme o seu e-mail"
+        description="Só falta confirmar a sua conta."
+        footer={
+          <Button
+            icon={<Mail size={16} />}
+            onClick={() => window.open('https://mail.google.com', '_blank', 'noopener,noreferrer')}
+          >
+            Abrir Gmail
+          </Button>
+        }
+      >
+        <div className="flex flex-col items-center gap-3 py-2 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-teal)]/[0.1] text-[var(--color-teal)]">
+            <Mail size={24} />
+          </div>
+          <p className="text-[14px] leading-relaxed text-muted">
+            Enviámos um link de confirmação para <strong className="font-semibold text-ink">{f.email}</strong>.
+            Abra a sua caixa de entrada e clique no link para ativar a conta.
+          </p>
+          <p className="text-[13px] leading-relaxed text-muted">
+            Se não encontrar a mensagem, verifique também a pasta de <strong className="font-medium text-ink">spam</strong> ou lixo eletrónico.
+          </p>
+        </div>
+      </Modal>
+    </>
   );
 }
