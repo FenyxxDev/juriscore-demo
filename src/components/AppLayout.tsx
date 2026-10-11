@@ -208,6 +208,23 @@ function Topbar() {
   const { pathname } = useLocation();
   const { dispatch } = useStore();
   const navigate = useNavigate();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    // Primeiro limpa a sessão local e muda de rota: a UI não fica dependente da rede.
+    dispatch({ type: 'logout' });
+    navigate('/', { replace: true });
+    // O logout remoto é melhor-effort e tem limite de tempo para não travar a aplicação.
+    if (supabase) {
+      void Promise.race([
+        supabase.auth.signOut(),
+        new Promise((resolve) => window.setTimeout(resolve, 2500)),
+      ]).catch(() => undefined);
+    }
+  }
+
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-panel px-5 md:px-7">
       <span className="flex items-center gap-2 md:hidden">
@@ -244,11 +261,9 @@ function Topbar() {
           <Settings size={18} strokeWidth={1.75} />
         </NavLink>
         <button
-          onClick={() => {
-            void supabase?.auth.signOut();
-            dispatch({ type: 'logout' });
-            navigate('/');
-          }}
+          type="button"
+          onClick={handleLogout}
+          disabled={loggingOut}
           className="flex items-center gap-2 rounded-md px-2.5 py-2 text-[13px] font-medium text-muted transition-colors hover:bg-slate-100 hover:text-ink"
         >
           <LogOut size={16} strokeWidth={1.75} />
