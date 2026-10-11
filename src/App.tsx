@@ -4,6 +4,7 @@ import { ToastProvider } from './components/ui';
 import { StoreProvider, useStore } from './store';
 import { router } from './routes';
 import { supabase } from './lib/supabase';
+import { rel, type Advogado, type Perfil } from './data';
 
 function SessionBootstrap() {
   const { dispatch, advogados } = useStore();
@@ -11,9 +12,36 @@ function SessionBootstrap() {
   useEffect(() => {
     if (!supabase) return;
     void supabase.auth.getSession().then(({ data }) => {
-      const email = data.session?.user.email?.toLowerCase();
+      const supaUser = data.session?.user;
+      const email = supaUser?.email?.toLowerCase();
       const conta = email ? advogados.find((a) => a.email.toLowerCase() === email) : undefined;
-      if (conta) dispatch({ type: 'login', userId: conta.id, lembrar: true });
+      if (conta) {
+        dispatch({ type: 'login', userId: conta.id, lembrar: true });
+        return;
+      }
+      if (!supaUser || !email) return;
+      const meta = supaUser.user_metadata ?? {};
+      const perfil: Perfil = meta.perfil === 'Administrador' || meta.perfil === 'Assistente' ? meta.perfil : 'Advogado';
+      const usuario: Advogado = {
+        id: supaUser.id,
+        nome: meta.nome || email.split('@')[0],
+        email,
+        senha: '',
+        telefone: meta.telefone || '',
+        perfil,
+        ativo: true,
+        oab: meta.oab || '',
+        oabUf: meta.oabUf,
+        especialidade: meta.especialidade,
+        anosExperiencia: meta.anosExperiencia,
+        areas: Array.isArray(meta.areas) ? meta.areas : [],
+        equipe: meta.equipe,
+        cargo: meta.cargo,
+        escritorio: meta.escritorio,
+        ultimaAtividade: rel(0),
+      };
+      dispatch({ type: 'register', usuario });
+      dispatch({ type: 'login', userId: usuario.id, lembrar: true });
     });
   }, [advogados, dispatch]);
 

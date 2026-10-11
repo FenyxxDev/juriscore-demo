@@ -6,6 +6,7 @@ import { AreaPicker } from '../components/Areas';
 import { AuthShell, EMAIL_RE, PasswordInput } from './Login';
 import { type Advogado, type Perfil, UFS, rel } from '../data';
 import { uid, useStore } from '../store';
+import { supabase } from '../lib/supabase';
 
 const PERFIL_OPCOES: { id: Perfil; label: string; desc: string; Icon: typeof Scale }[] = [
   { id: 'Administrador', label: 'Administrador ou Gestor', desc: 'Gerencia o escritório, a equipe e os indicadores.', Icon: UserCog },
@@ -105,37 +106,72 @@ export function Cadastro() {
     return Object.keys(e).length === 0;
   }
 
-  function onSubmit(ev: FormEvent) {
+  async function onSubmit(ev: FormEvent) {
     ev.preventDefault();
     if (!validar(etapa)) return;
     if (etapa < 2) return setEtapa(etapa + 1);
+    if (!supabase) {
+      toast({ tone: 'error', message: 'O cadastro está temporariamente indisponível. Configure o Supabase.' });
+      return;
+    }
     setLoading(true);
-    setTimeout(() => {
-      const perfil = f.perfil as Perfil;
-      const oabNum = f.oab.replace(/\D/g, '');
-      const usuario: Advogado = {
-        id: uid('adv'),
-        nome: f.nome.trim(),
-        email: f.email.trim().toLowerCase(),
-        senha: f.senha,
-        telefone: f.telefone,
-        perfil,
-        ativo: true,
-        oab: perfil === 'Advogado' ? `OAB/${f.oabUf} ${oabNum.replace(/(\d)(?=(\d{3})+$)/, '$1.')}` : '',
-        oabUf: perfil === 'Advogado' ? f.oabUf : undefined,
-        especialidade: perfil === 'Advogado' ? f.especialidade.trim() : undefined,
-        anosExperiencia: perfil === 'Advogado' && f.anos ? Number(f.anos) : undefined,
-        areas: perfil === 'Administrador' ? [] : f.areas,
-        equipe: perfil === 'Assistente' ? f.equipe : undefined,
-        cargo: perfil === 'Administrador' ? f.cargo.trim() : undefined,
-        escritorio: perfil === 'Administrador' ? f.escritorio.trim() : undefined,
-        ultimaAtividade: rel(0),
-      };
-      dispatch({ type: 'register', usuario });
-      dispatch({ type: 'login', userId: usuario.id, lembrar: true });
+    const perfil = f.perfil as Perfil;
+    const oabNum = f.oab.replace(/\D/g, '');
+    const usuario: Advogado = {
+      id: uid('adv'),
+      nome: f.nome.trim(),
+      email: f.email.trim().toLowerCase(),
+      senha: '',
+      telefone: f.telefone,
+      perfil,
+      ativo: true,
+      oab: perfil === 'Advogado' ? `OAB/${f.oabUf} ${oabNum.replace(/(\d)(?=(\d{3})+$)/, '$1.')}` : '',
+      oabUf: perfil === 'Advogado' ? f.oabUf : undefined,
+      especialidade: perfil === 'Advogado' ? f.especialidade.trim() : undefined,
+      anosExperiencia: perfil === 'Advogado' && f.anos ? Number(f.anos) : undefined,
+      areas: perfil === 'Administrador' ? [] : f.areas,
+      equipe: perfil === 'Assistente' ? f.equipe : undefined,
+      cargo: perfil === 'Administrador' ? f.cargo.trim() : undefined,
+      escritorio: perfil === 'Administrador' ? f.escritorio.trim() : undefined,
+      ultimaAtividade: rel(0),
+    };
+
+    const { data, error } = await supabase.auth.signUp({
+      email: usuario.email,
+      password: f.senha,
+      options: {
+        data: {
+          nome: usuario.nome,
+          telefone: usuario.telefone,
+          perfil: usuario.perfil,
+          oab: usuario.oab,
+          oabUf: usuario.oabUf,
+          especialidade: usuario.especialidade,
+          anosExperiencia: usuario.anosExperiencia,
+          areas: usuario.areas,
+          equipe: usuario.equipe,
+          cargo: usuario.cargo,
+          escritorio: usuario.escritorio,
+        },
+      },
+    });
+
+    setLoading(false);
+    if (error) {
+      setErrs((e) => ({ ...e, email: /already registered|already exists/i.test(error.message) ? 'Este e-mail já está cadastrado.' : error.message }));
+      setEtapa(0);
+      return;
+    }
+
+    if (data.session && data.user) {
+      dispatch({ type: 'register', usuario: { ...usuario, id: data.user.id } });
+      dispatch({ type: 'login', userId: data.user.id, lembrar: true });
       toast({ tone: 'success', message: 'Conta criada. Bem-vindo ao JurisCore.' });
       navigate('/dashboard');
-    }, 700);
+    } else {
+      toast({ tone: 'success', message: 'Conta criada. Confirme o seu e-mail para entrar.' });
+      navigate('/');
+    }
   }
 
   return (

@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router';
+import { Link, Navigate, useNavigate } from 'react-router';
 import { ArrowRight, Eye, EyeOff, Scale } from 'lucide-react';
 import { Alert, Button, Checkbox, Field, Input, Modal, useToast } from '../components/ui';
 import { useStore } from '../store';
@@ -161,6 +161,11 @@ export function Login() {
           Entrar
         </Button>
       </form>
+
+      <p className="mt-6 text-center text-[13px] text-muted">
+        Ainda não possui uma conta?{' '}
+        <Link to="/cadastro" className="font-medium text-[var(--color-teal)] hover:underline">Criar conta</Link>
+      </p>
 
       <p className="mt-10 border-t border-line pt-4 text-center text-[11.5px] leading-relaxed text-[var(--color-faint)]">
         {supabaseConfigured ? 'Acesso protegido pelo Supabase.' : 'Configure o Supabase para ativar o acesso.'}
