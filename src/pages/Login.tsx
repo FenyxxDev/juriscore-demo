@@ -118,11 +118,33 @@ export function Login() {
       setLoading(false);
       return setErro('credenciais');
     }
-    const contaExistente = advogados.find((a) => a.email.toLowerCase() === data.user.email?.toLowerCase()); const metadata = data.user.user_metadata ?? {}; const perfil = ['Administrador', 'Advogado', 'Assistente'].includes(metadata.perfil) ? metadata.perfil : 'Advogado'; const conta = contaExistente ?? { id: data.user.id, nome: typeof metadata.nome === 'string' && metadata.nome.trim() ? metadata.nome.trim() : (data.user.email ?? email.trim()), email: (data.user.email ?? email.trim()).toLowerCase(), senha: '', telefone: typeof metadata.telefone === 'string' ? metadata.telefone : '', perfil, ativo: true, oab: typeof metadata.oab === 'string' ? metadata.oab : '', oabUf: metadata.oabUf, especialidade: metadata.especialidade, anosExperiencia: typeof metadata.anosExperiencia === 'number' ? metadata.anosExperiencia : undefined, areas: Array.isArray(metadata.areas) ? metadata.areas : [], equipe: metadata.equipe, cargo: metadata.cargo, escritorio: metadata.escritorio, ultimaAtividade: '' }; if (!contaExistente) dispatch({ type: 'register', usuario: conta });
-    if (!conta) {
-      setLoading(false);
-      return setErro('credenciais');
-    }
+    const metadata = data.user.user_metadata ?? {};
+    const trustedPerfil = data.user.app_metadata?.perfil;
+    const perfil = ['Administrador', 'Advogado', 'Assistente'].includes(trustedPerfil)
+      ? trustedPerfil as 'Administrador' | 'Advogado' | 'Assistente'
+      : 'Advogado';
+    const contaExistente = advogados.find((a) => a.id === data.user.id);
+    const conta = contaExistente
+      ? { ...contaExistente, id: data.user.id, perfil }
+      : {
+          id: data.user.id,
+          nome: typeof metadata.nome === 'string' && metadata.nome.trim() ? metadata.nome.trim() : (data.user.email ?? email.trim()),
+          email: (data.user.email ?? email.trim()).toLowerCase(),
+          senha: '',
+          telefone: typeof metadata.telefone === 'string' ? metadata.telefone : '',
+          perfil,
+          ativo: true,
+          oab: typeof metadata.oab === 'string' ? metadata.oab : '',
+          oabUf: metadata.oabUf,
+          especialidade: metadata.especialidade,
+          anosExperiencia: typeof metadata.anosExperiencia === 'number' ? metadata.anosExperiencia : undefined,
+          areas: Array.isArray(metadata.areas) ? metadata.areas : [],
+          equipe: metadata.equipe,
+          cargo: metadata.cargo,
+          escritorio: metadata.escritorio,
+          ultimaAtividade: '',
+        };
+    dispatch({ type: 'register', usuario: conta });
     if (!conta.ativo) {
       setLoading(false);
       return setErro('inativo');
