@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
-import { ArrowLeft, ArrowRight, Briefcase, Mail, Scale, UserCog } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail, Scale } from 'lucide-react';
 import { Button, Field, Input, Modal, Select, cx, useToast } from '../components/ui';
 import { AreaPicker } from '../components/Areas';
 import { AuthShell, EMAIL_RE, PasswordInput } from './Login';
@@ -9,9 +9,7 @@ import { uid, useStore } from '../store';
 import { supabase } from '../lib/supabase';
 
 const PERFIL_OPCOES: { id: Perfil; label: string; desc: string; Icon: typeof Scale }[] = [
-  { id: 'Administrador', label: 'Administrador ou Gestor', desc: 'Gerencia o escritório, a equipe e os indicadores.', Icon: UserCog },
-  { id: 'Advogado', label: 'Advogado', desc: 'Conduz processos, prazos e audiências.', Icon: Scale },
-  { id: 'Assistente', label: 'Assistente jurídico', desc: 'Apoia a operação: cadastros, documentos e agenda.', Icon: Briefcase },
+  { id: 'Advogado', label: 'Advogado', desc: 'Acesso padrão. Perfis administrativos são atribuídos pela equipe do escritório.', Icon: Scale },
 ];
 
 const ETAPAS = ['Dados pessoais', 'Perfil', 'Atuação'];
@@ -58,7 +56,7 @@ export function Cadastro() {
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [f, setF] = useState({
     nome: '', email: '', telefone: '', senha: '', confirmar: '',
-    perfil: '' as Perfil | '',
+    perfil: 'Advogado' as Perfil | '',
     oab: '', oabUf: 'PE', especialidade: '', anos: '', areas: [] as string[],
     equipe: '', cargo: '', escritorio: '',
   });
@@ -353,3 +351,4 @@ export function Cadastro() {
     </>
   );
 }
+
