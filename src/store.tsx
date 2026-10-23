@@ -165,7 +165,12 @@ function reducer(state: State, action: Action): State {
     case 'logout':
       return { ...state, session: null };
     case 'register':
-      return { ...state, advogados: [...state.advogados, action.usuario] };
+      return {
+        ...state,
+        advogados: state.advogados.some((a) => a.id === action.usuario.id)
+          ? state.advogados.map((a) => (a.id === action.usuario.id ? action.usuario : a))
+          : [...state.advogados, action.usuario],
+      };
     case 'updateUsuario':
       return { ...state, advogados: state.advogados.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)) };
     case 'endSessions':
@@ -486,3 +491,4 @@ export function useStore() {
   if (!v) throw new Error('useStore must be used within StoreProvider');
   return v;
 }
+
