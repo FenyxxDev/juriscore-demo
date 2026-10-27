@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
-import { ArrowLeft, ArrowRight, Mail, Scale } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail, Scale, ShieldCheck, UsersRound } from 'lucide-react';
 import { Button, Field, Input, Modal, Select, cx, useToast } from '../components/ui';
 import { AreaPicker } from '../components/Areas';
 import { AuthShell, EMAIL_RE, PasswordInput } from './Login';
@@ -9,7 +9,9 @@ import { uid, useStore } from '../store';
 import { supabase } from '../lib/supabase';
 
 const PERFIL_OPCOES: { id: Perfil; label: string; desc: string; Icon: typeof Scale }[] = [
-  { id: 'Advogado', label: 'Advogado', desc: 'Acesso padrão. Perfis administrativos são atribuídos pela equipe do escritório.', Icon: Scale },
+  { id: 'Administrador', label: 'Administrador', desc: 'Solicitação de acesso administrativo sujeita à aprovação.', Icon: ShieldCheck },
+  { id: 'Advogado', label: 'Advogado', desc: 'Acesso padrão para atuação jurídica no escritório.', Icon: Scale },
+  { id: 'Assistente', label: 'Assistente', desc: 'Solicitação de acesso de assistente sujeita à aprovação.', Icon: UsersRound },
 ];
 
 const ETAPAS = ['Dados pessoais', 'Perfil', 'Atuação'];
@@ -53,6 +55,8 @@ export function Cadastro() {
   const [etapa, setEtapa] = useState(0);
   const [loading, setLoading] = useState(false);
   const [emailPopupOpen, setEmailPopupOpen] = useState(false);
+  const [solicitacaoPendente, setSolicitacaoPendente] = useState(false);
+  const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false);
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [f, setF] = useState({
     nome: '', email: '', telefone: '', senha: '', confirmar: '',
@@ -147,7 +151,8 @@ export function Cadastro() {
           // Mantemos as duas formas para facilitar leitura e validação futura.
           telefone,
           phone: telefoneNumeros,
-          perfil: usuario.perfil,
+          // É apenas uma solicitação não confiável; a role efetiva vem de app_metadata.
+          perfil_solicitado: usuario.perfil,
           oab: usuario.oab,
           oabUf: usuario.oabUf,
           especialidade: usuario.especialidade,
@@ -160,20 +165,36 @@ export function Cadastro() {
       },
     });
 
-    setLoading(false);
     if (error) {
+      setLoading(false);
       setErrs((e) => ({ ...e, email: /already registered|already exists/i.test(error.message) ? 'Este e-mail já está cadastrado.' : error.message }));
       setEtapa(0);
       return;
     }
 
+    if (data.session && data.user && perfil !== 'Advogado') {
+      const { error: signOutError } = await supabase.auth.signOut();
+      setLoading(false);
+      if (signOutError) {
+        toast({ tone: 'error', message: 'A conta foi criada, mas não foi possível encerrar a sessão. Tente entrar novamente após a aprovação.' });
+        return;
+      }
+      setSolicitacaoPendente(true);
+      setEmailConfirmationRequired(false);
+      setEmailPopupOpen(true);
+      return;
+    }
+
+    setLoading(false);
     if (data.session && data.user) {
       dispatch({ type: 'register', usuario: { ...usuario, id: data.user.id } });
       dispatch({ type: 'login', userId: data.user.id, lembrar: true });
       toast({ tone: 'success', message: 'Conta criada. Bem-vindo ao JurisCore.' });
       navigate('/clientes');
     } else {
-      toast({ tone: 'success', message: 'Conta criada. Confirme o seu e-mail para entrar.' });
+      setSolicitacaoPendente(perfil !== 'Advogado');
+      setEmailConfirmationRequired(true);
+      toast({ tone: 'success', message: perfil === 'Advogado' ? 'Conta criada. Confirme o seu e-mail para entrar.' : 'Solicitação criada. Confirme o e-mail e aguarde aprovação do perfil.' });
       setEmailPopupOpen(true);
     }
   }
@@ -248,7 +269,7 @@ export function Cadastro() {
               );
             })}
             {errs.perfil && <p className="text-[12.5px] text-[var(--color-danger)]">{errs.perfil}</p>}
-            <p className="mt-1 text-[12px] text-[var(--color-faint)]">O perfil define suas permissões e só pode ser alterado pelo administrador do escritório.</p>
+            <p className="mt-1 text-[12px] text-[var(--color-faint)]">A escolha registra apenas uma solicitação. Administrador e Assistente só recebem essas permissões após aprovação confiável.</p>
           </div>
         )}
 
@@ -324,15 +345,12 @@ export function Cadastro() {
       <Modal
         open={emailPopupOpen}
         onClose={() => { setEmailPopupOpen(false); navigate('/'); }}
-        title="Confirme o seu e-mail"
-        description="Só falta confirmar a sua conta."
+        title={emailConfirmationRequired ? 'Confirme o seu e-mail' : 'Solicitação enviada'}
+        description={emailConfirmationRequired ? 'Só falta confirmar a sua conta.' : 'O acesso ao perfil solicitado depende de aprovação.'}
         footer={
-          <Button
-            icon={<Mail size={16} />}
-            onClick={() => window.open('https://mail.google.com', '_blank', 'noopener,noreferrer')}
-          >
-            Abrir Gmail
-          </Button>
+          emailConfirmationRequired
+            ? <Button icon={<Mail size={16} />} onClick={() => window.open('https://mail.google.com', '_blank', 'noopener,noreferrer')}>Abrir Gmail</Button>
+            : <Button variant="secondary" onClick={() => { setEmailPopupOpen(false); navigate('/'); }}>Voltar ao login</Button>
         }
       >
         <div className="flex flex-col items-center gap-3 py-2 text-center">
@@ -340,15 +358,13 @@ export function Cadastro() {
             <Mail size={24} />
           </div>
           <p className="text-[14px] leading-relaxed text-muted">
-            Enviámos um link de confirmação para <strong className="font-semibold text-ink">{f.email}</strong>.
-            Abra a sua caixa de entrada e clique no link para ativar a conta.
+            Conta criada para <strong className="font-semibold text-ink">{f.email}</strong>.
+            {emailConfirmationRequired && ' Abra a caixa de entrada e clique no link de confirmação.'}
           </p>
-          <p className="text-[13px] leading-relaxed text-muted">
-            Se não encontrar a mensagem, verifique também a pasta de <strong className="font-medium text-ink">spam</strong> ou lixo eletrónico.
-          </p>
+          {solicitacaoPendente && <p className="text-[13px] leading-relaxed text-muted">A solicitação de perfil {f.perfil} aguarda aprovação de um administrador. A seleção feita no cadastro não concede essas permissões.</p>}
+          {emailConfirmationRequired && <p className="text-[13px] leading-relaxed text-muted">Se não encontrar a mensagem, verifique também a pasta de <strong className="font-medium text-ink">spam</strong> ou lixo eletrónico.</p>}
         </div>
       </Modal>
     </>
   );
 }
-
