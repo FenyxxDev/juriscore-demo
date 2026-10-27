@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { Check, LaptopMinimal, LogOut, Minus, Smartphone } from 'lucide-react';
 import { Avatar, Button, Card, Field, Input, PanelHeader, Segmented, Select, Tabs, cx, useToast } from '../components/ui';
@@ -8,6 +8,7 @@ import { EMAIL_RE, PasswordInput } from './Login';
 import { SenhaMeter, forcaSenha } from './Cadastro';
 import { PERFIS, UFS } from '../data';
 import { NOTIF_CATEGORIAS, PERMISSOES, useStore } from '../store';
+import { supabase } from '../lib/supabase';
 
 const TABS = [
   { id: 'perfil', label: 'Perfil' },
@@ -198,7 +199,39 @@ function SegurancaTab() {
 
 function UsuariosTab() {
   const { can, advogados } = useStore();
+  const [emailSolicitado, setEmailSolicitado] = useState('');
+  const [aprovando, setAprovando] = useState(false);
+  const [resultadoAprovacao, setResultadoAprovacao] = useState<{ ok: boolean; mensagem: string } | null>(null);
   const porPerfil = PERFIS.map((p) => ({ p, n: advogados.filter((a) => a.perfil === p && a.ativo).length }));
+
+  async function aprovarSolicitacao(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) {
+      setResultadoAprovacao({ ok: false, mensagem: 'Supabase não está configurado.' });
+      return;
+    }
+    setAprovando(true);
+    setResultadoAprovacao(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('aprovar-role', {
+        body: { email: emailSolicitado.trim().toLowerCase() },
+      });
+      if (error || data?.error) {
+        setResultadoAprovacao({
+          ok: false,
+          mensagem: data?.error ?? 'Não foi possível aprovar. Confirme se existe uma solicitação pendente e se a função está publicada.',
+        });
+        return;
+      }
+      setResultadoAprovacao({ ok: true, mensagem: `Perfil ${data.perfil} aprovado para ${data.email}.` });
+      setEmailSolicitado('');
+    } catch {
+      setResultadoAprovacao({ ok: false, mensagem: 'Falha de rede ao enviar a aprovação. Tente novamente.' });
+    } finally {
+      setAprovando(false);
+    }
+  }
+
   return (
     <Card>
       <PanelHeader
@@ -214,6 +247,32 @@ function UsuariosTab() {
           </div>
         ))}
       </div>
+      {can('gerenciarUsuarios') && (
+        <div className="border-t border-line px-5 py-4">
+          <PanelHeader title="Aprovar solicitação de perfil" subtitle="A role só é aplicada pelo Supabase após validação administrativa." />
+          <form onSubmit={aprovarSolicitacao} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+            <Field label="E-mail da conta que solicitou Administrador ou Assistente" htmlFor="role-request-email" required>
+              <Input
+                id="role-request-email"
+                type="email"
+                autoComplete="email"
+                value={emailSolicitado}
+                required
+                onChange={(event) => setEmailSolicitado(event.target.value)}
+              />
+            </Field>
+            <Button type="submit" loading={aprovando} disabled={!emailSolicitado.trim()}>
+              Aprovar solicitação
+            </Button>
+          </form>
+          {resultadoAprovacao && (
+            <p aria-live="polite" className={cx('mt-3 text-[13px]', resultadoAprovacao.ok ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]')}>
+              {resultadoAprovacao.mensagem}
+            </p>
+          )}
+          <p className="mt-2 text-[12px] text-muted">A função verifica sua role confiável no servidor, a solicitação registrada na conta e a confirmação do e-mail. A escolha do cadastro não concede acesso.</p>
+        </div>
+      )}
       {!can('gerenciarUsuarios') && (
         <p className="border-t border-line px-5 py-3.5 text-[13px] text-muted">
           Apenas administradores podem convidar usuários ou alterar perfis. Consulte a <Link to="/equipe" className="font-medium text-[var(--color-teal)] hover:underline">equipe</Link>.
