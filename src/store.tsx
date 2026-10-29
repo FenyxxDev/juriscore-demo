@@ -12,13 +12,7 @@ import {
   type Prazo,
   type Processo,
   type Tarefa,
-  advogadosSeed,
-  clientesSeed,
-  compromissosSeed,
   diasAte,
-  processosSeed,
-  rel,
-  tarefasSeed,
   toneOf,
 } from './data';
 
@@ -358,23 +352,30 @@ const STATUS_LABELS: { tone: StatusTone; label: string }[] = [
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
     session: null,
-    clientes: clientesSeed,
-    advogados: advogadosSeed,
-    processos: processosSeed,
-    tarefas: tarefasSeed,
-    compromissos: compromissosSeed,
+    clientes: [],
+    advogados: [],
+    processos: [],
+    tarefas: [],
+    compromissos: [],
     lidas: [],
     notifPrefs: { 'prazos-proximos': true, 'prazos-atrasados': true, audiencias: true, processos: true, documentos: true, tarefas: true },
-    prefs: { iaAtiva: true, agendaVisao: 'semana', canalEmail: true, canalApp: true, resumoDiario: false, antecedenciaPrazo: 3, distribuicao: 'area', escritorio: { nome: 'Silva & Costa Advogados Associados', cnpj: '12.345.678/0001-90', cidade: 'Recife, PE', email: 'contato@silvacosta.adv.br' } },
-    sessoes: [
-      { id: 's1', dispositivo: 'Chrome · macOS', local: 'Recife, PE', inicio: 'Agora', atual: true },
-      { id: 's2', dispositivo: 'Safari · iPhone', local: 'Recife, PE', inicio: rel(-1, '19h22') },
-      { id: 's3', dispositivo: 'Edge · Windows', local: 'Olinda, PE', inicio: rel(-3, '08h05') },
-    ],
+    prefs: { iaAtiva: true, agendaVisao: 'semana', canalEmail: false, canalApp: true, resumoDiario: false, antecedenciaPrazo: 3, distribuicao: 'manual', escritorio: { nome: '', cnpj: '', cidade: '', email: '' } },
+    sessoes: [],
   });
 
   const value = useMemo<StoreValue>(() => {
-    const conta = state.advogados.find((a) => a.id === state.session?.userId) ?? state.advogados[0];
+    const conta = state.advogados.find((a) => a.id === state.session?.userId) ?? {
+      id: state.session?.userId ?? '',
+      nome: 'Utilizador',
+      email: '',
+      senha: '',
+      telefone: '',
+      perfil: 'Advogado' as Perfil,
+      ativo: false,
+      oab: '',
+      areas: [],
+      ultimaAtividade: '',
+    };
     const role = conta.perfil;
     const user = { ...conta, name: conta.nome, role };
     const can = (p: Permissao) => !!PERMISSOES.find((x) => x.id === p)?.perfis.includes(role);
@@ -491,4 +492,3 @@ export function useStore() {
   if (!v) throw new Error('useStore must be used within StoreProvider');
   return v;
 }
-
