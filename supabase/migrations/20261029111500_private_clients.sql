@@ -69,37 +69,8 @@ CREATE TRIGGER clients_set_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION public.set_clients_updated_at();
 
--- Migra clientes legados do JSON de cada profile para a tabela isolada.
--- IDs e demais campos de profile são preservados; IDs ausentes recebem um
--- valor determinístico para que reexecutar a migration não duplique linhas.
-INSERT INTO public.clients (owner_id, id, name, type, document, status)
-SELECT
-  p.id,
-  COALESCE(
-    NULLIF(btrim(entry.value ->> 'id'), ''),
-    md5(p.id::text || ':' || entry.ordinality::text || ':' || entry.value::text)
-  ),
-  btrim(entry.value ->> 'nome'),
-  CASE
-    WHEN entry.value ->> 'tipo' = 'Pessoa Jurídica' THEN 'Pessoa Jurídica'
-    ELSE 'Pessoa Física'
-  END,
-  COALESCE(NULLIF(btrim(entry.value ->> 'documento'), ''), '-'),
-  COALESCE(NULLIF(btrim(entry.value ->> 'status'), ''), 'ativo')
-FROM public.profiles AS p
-JOIN auth.users AS u ON u.id = p.id
-CROSS JOIN LATERAL jsonb_array_elements(
-  CASE
-    WHEN jsonb_typeof(p.data -> 'clients') = 'array' THEN p.data -> 'clients'
-    ELSE '[]'::jsonb
-  END
-) WITH ORDINALITY AS entry(value, ordinality)
-WHERE jsonb_typeof(p.data) = 'object'
-  AND NULLIF(btrim(entry.value ->> 'nome'), '') IS NOT NULL
-ON CONFLICT (owner_id, id) DO NOTHING;
-
--- Remove a cópia antiga somente depois do backfill, para que não permaneça
--- acessível por meio do JSON de profiles e contorne as políticas da nova tabela.
+-- Os registros de clientes existentes eram fictícios e não devem ser migrados.
+-- Remove somente essa chave legada para que os dados de demonstração não reapareçam.
 UPDATE public.profiles
 SET data = data - 'clients'
 WHERE jsonb_typeof(data) = 'object'
