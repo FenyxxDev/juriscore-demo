@@ -19,10 +19,29 @@ import { supabase } from '../lib/supabase';
 
 const PER_PAGE = 6;
 
+type ClientRow = {
+  id: string;
+  name: string;
+  type: Cliente['tipo'];
+  document: string;
+  status: string;
+  updated_at: string;
+};
+
+const toCliente = (row: ClientRow): Cliente => ({
+  id: row.id,
+  nome: row.name,
+  tipo: row.type,
+  documento: row.document,
+  atualizacao: new Date(row.updated_at).toLocaleDateString('pt-BR'),
+  status: row.status as Cliente['status'],
+});
+
 export function Clientes() {
   const { processos, can } = useStore();
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loadingClients, setLoadingClients] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const podeCriar = can('cadastrarCliente');
   const toast = useToast();
   const [query, setQuery] = useState('');
@@ -36,20 +55,25 @@ export function Clientes() {
   useEffect(() => {
     let active = true;
     async function loadClients() {
-      if (!supabase) {
-        setLoadingClients(false);
-        return;
+      try {
+        if (!supabase) throw new Error('Supabase não está configurado.');
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        const userId = authData.user?.id;
+        if (!userId) throw new Error('Sessão expirada.');
+
+        const { data, error } = await supabase
+          .from('clients')
+          .select('id, name, type, document, status, updated_at')
+          .eq('owner_id', userId)
+          .order('updated_at', { ascending: false });
+        if (error) throw error;
+        if (active) setClientes(((data ?? []) as ClientRow[]).map(toCliente));
+      } catch {
+        if (active) setLoadError(true);
+      } finally {
+        if (active) setLoadingClients(false);
       }
-      const { data: authData } = await supabase.auth.getUser();
-      const userId = authData.user?.id;
-      if (!userId) { setLoadingClients(false); return; }
-      const { data: profile, error } = await supabase
-        .from('profiles').select('data').eq('id', userId).maybeSingle();
-      if (active && !error) {
-        const stored = (profile?.data as { clients?: Cliente[] } | null)?.clients ?? [];
-        setClientes(stored);
-      }
-      if (active) setLoadingClients(false);
     }
     void loadClients();
     return () => { active = false; };
@@ -91,7 +115,7 @@ export function Clientes() {
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[28px] font-semibold text-ink">Clientes</h1>
-          <p className="mt-1 text-muted">Gerencie as pessoas e empresas do seu escritório.</p>
+          <p className="mt-1 text-muted">Gerencie as pessoas e empresas cadastradas na sua conta.</p>
         </div>
         {podeCriar && (
           <Button icon={<Plus size={16} />} onClick={() => setModalOpen(true)}>
@@ -142,13 +166,17 @@ export function Clientes() {
 
         {loadingClients ? (
           <p className="px-5 py-10 text-center text-[13px] text-muted">Carregando clientes...</p>
+        ) : loadError ? (
+          <p className="px-5 py-10 text-center text-[13px] text-muted">
+            Não foi possível carregar seus clientes. Verifique sua conexão e tente novamente.
+          </p>
         ) : rows.length === 0 ? (
           <EmptyState
             icon={<Users size={26} />}
             title={clientes.length === 0 ? 'Você ainda não possui clientes cadastrados.' : 'Nenhum cliente encontrado.'}
             description={
               clientes.length === 0
-                ? 'Comece adicionando o primeiro cliente ao seu escritório.'
+                ? 'Comece adicionando o primeiro cliente à sua conta.'
                 : 'Ajuste a busca ou os filtros para ver resultados.'
             }
             action={
@@ -212,23 +240,36 @@ export function Clientes() {
         onSave={async (cliente) => {
           if (!supabase) {
             toast({ tone: 'error', message: 'Supabase não está configurado.' });
-            return;
+            return false;
           }
-          const { data: authData } = await supabase.auth.getUser();
+          const { data: authData, error: authError } = await supabase.auth.getUser();
           const userId = authData.user?.id;
-          if (!userId) { toast({ tone: 'error', message: 'Sessão expirada. Entre novamente.' }); return; }
-          const { data: profile, error: readError } = await supabase.from('profiles').select('data').eq('id', userId).maybeSingle();
-          const profileData = (profile?.data as Record<string, unknown> | null) ?? {};
-          const stored = (profileData.clients as Cliente[] | undefined) ?? clientes;
-          const next: Cliente = { id: crypto.randomUUID(), nome: cliente.nome, tipo: cliente.tipo, documento: cliente.documento, status: 'ativo', atualizacao: new Date().toLocaleDateString('pt-BR') };
-          const { error } = await supabase.from('profiles').upsert({ id: userId, data: { ...profileData, clients: [next, ...stored] } });
-          if (error || readError) {
-            toast({ tone: 'error', message: error?.message ?? readError?.message ?? 'Não foi possível salvar o cliente.' });
-            return;
+          if (authError || !userId) {
+            toast({ tone: 'error', message: 'Sessão expirada. Entre novamente.' });
+            return false;
           }
+
+          const { data, error } = await supabase
+            .from('clients')
+            .insert({
+              owner_id: userId,
+              name: cliente.nome,
+              type: cliente.tipo,
+              document: cliente.documento,
+              status: 'ativo',
+            })
+            .select('id, name, type, document, status, updated_at')
+            .single();
+          if (error || !data) {
+            toast({ tone: 'error', message: 'Não foi possível salvar o cliente. Tente novamente.' });
+            return false;
+          }
+
+          const next = toCliente(data as ClientRow);
           setClientes((current) => [next, ...current]);
           setModalOpen(false);
           toast({ tone: 'success', message: `Cliente "${cliente.nome}" cadastrado.` });
+          return true;
         }}
       />
     </div>
@@ -242,7 +283,7 @@ export function NovoClienteModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (c: { nome: string; tipo: 'Pessoa Física' | 'Pessoa Jurídica'; documento: string }) => void;
+  onSave: (c: { nome: string; tipo: 'Pessoa Física' | 'Pessoa Jurídica'; documento: string }) => Promise<boolean>;
 }) {
   const [nome, setNome] = useState('');
   const [tipo, setTipo] = useState<'Pessoa Física' | 'Pessoa Jurídica'>('Pessoa Física');
@@ -255,10 +296,12 @@ export function NovoClienteModal({
       setErr('Informe o nome do cliente.');
       return;
     }
-    onSave({ nome: nome.trim(), tipo, documento: documento.trim() || '-' });
-    setNome('');
-    setDocumento('');
-    setErr('');
+    void onSave({ nome: nome.trim(), tipo, documento: documento.trim() || '-' }).then((saved) => {
+      if (!saved) return;
+      setNome('');
+      setDocumento('');
+      setErr('');
+    }).catch(() => setErr('Não foi possível salvar o cliente. Tente novamente.'));
   };
 
   return (
