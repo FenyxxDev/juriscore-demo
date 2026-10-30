@@ -34,6 +34,7 @@ import { AIFailed, AIResultView, AIWorking } from '../components/AIResult';
 import { AreaTag } from '../components/Areas';
 import { procLink, useStore } from '../store';
 import { addProcessMovement, completeProcessDeadline, createProcessDeadline, getProcessByNumber, setProcessStatus, updateProcess } from '../lib/processes';
+import { downloadDocument, listDocumentsForCase } from '../lib/documents';
 import { type AIResult, useAI } from '../ai';
 import { AREAS, diasAte, type Prioridade } from '../data';
 
@@ -69,8 +70,10 @@ export function ProcessoDetalhe() {
     let active = true;
     setLoading(true);
     setLoadError(false);
-    void getProcessByNumber(decoded)
-      .then((process) => { if (active) setProc(process as Proc | null); })
+    void Promise.all([getProcessByNumber(decoded), listDocumentsForCase(decoded)])
+      .then(([process, documents]) => {
+        if (active) setProc(process ? { ...process, documentos: documents } as Proc : null);
+      })
       .catch(() => { if (active) setLoadError(true); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -87,6 +90,13 @@ export function ProcessoDetalhe() {
       toast({ tone: 'success', message: archived ? 'Processo arquivado.' : 'Processo encerrado.' });
     } catch (error) {
       toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível atualizar o processo.' });
+    }
+  };
+  const handleDocumentDownload = async (id: string, name: string) => {
+    try {
+      await downloadDocument(id);
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : `Não foi possível descarregar ${name}.` });
     }
   };
   const counts: Record<string, number> = {
@@ -154,7 +164,7 @@ export function ProcessoDetalhe() {
           {tab === 'Resumo' && <ResumoTab proc={proc} onTab={setTab} />}
           {tab === 'Timeline' && <TimelineTab proc={proc} item={item} />}
           {tab === 'Partes' && <PartesTab proc={proc} />}
-          {tab === 'Documentos' && <DocumentosTab proc={proc} item={item} />}
+          {tab === 'Documentos' && <DocumentosTab proc={proc} item={item} onDownload={handleDocumentDownload} />}
           {tab === 'Prazos' && <PrazosTab proc={proc} item={item} onAdd={() => setModal('prazo')} onComplete={async (deadlineId) => {
             try {
               await completeProcessDeadline(deadlineId);
@@ -550,9 +560,8 @@ function PartesTab({ proc }: { proc: Proc }) {
 
 /* ------------------------------------------------------------ Documentos */
 
-function DocumentosTab({ proc, item }: { proc: Proc; item: string | null }) {
+function DocumentosTab({ proc, item, onDownload }: { proc: Proc; item: string | null; onDownload: (id: string, name: string) => Promise<void> }) {
   const ai = useAI();
-  const toast = useToast();
   const { prefs } = useStore();
   const [aberto, setAberto] = useState<string | null>(null);
   const run = useAIRun();
@@ -599,7 +608,7 @@ function DocumentosTab({ proc, item }: { proc: Proc; item: string | null }) {
                     </button>
                     <button
                       aria-label={`Baixar ${d.nome}`}
-                      onClick={() => toast({ tone: 'info', message: `Download de ${d.nome} iniciado.` })}
+                      onClick={() => void onDownload(d.id, d.nome)}
                       className="rounded-md p-1.5 text-muted hover:bg-slate-100 hover:text-teal"
                     >
                       <Download size={16} />
