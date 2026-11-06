@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router';
 import { procLink, toStamp, useStore } from './store';
 import { AREAS, type Documento, type Processo, areaCurta, diasAte, parseData } from './data';
+import { completeProcessDeadline } from './lib/processes';
 
 /** A source citation the UI renders as a link to the original record. */
 export type Source = { label: string; to: string; kind?: 'processo' | 'movimentacao' | 'documento' | 'prazo' | 'audiencia' | 'cliente' | 'tarefa' | 'agenda' };
@@ -197,7 +198,7 @@ export function useAI() {
     return R({
       title: 'Insight do processo',
       text: '',
-      sections: [{ title: 'Insight da IA', lines: xs.map((x) => x.text), tone: 'insight' }],
+      sections: [{ title: 'Pontos para revisar', lines: xs.map((x) => x.text), tone: 'insight' }],
       sources: uniq(xs.flatMap((x) => x.sources)),
       confidence: 'parcial',
     });
@@ -340,7 +341,7 @@ export function useAI() {
       sections: [
         { title: 'Resumo', body: resumo },
         { title: 'Pontos importantes', lines: pontos.slice(0, 5) },
-        { title: 'Insight da IA', body: partes.join(' '), tone: 'insight' },
+        { title: 'Pontos para revisar', body: partes.join(' '), tone: 'insight' },
       ],
       more: [
         { title: 'Pedidos', lines: pedidos.length ? pedidos.map(cap) : [NAO_LOC] },
@@ -426,7 +427,7 @@ export function useAI() {
       sections: [
         { title: 'Resumo', body: frases.slice(0, Math.min(3, frases.length)).map((f) => cortar(f, 220)).join(' ') },
         { title: 'Pontos importantes', lines: pontos.slice(0, 5) },
-        { title: 'Insight da IA', body: insight, tone: 'insight' },
+        { title: 'Pontos para revisar', body: insight, tone: 'insight' },
       ],
       more: [
         { title: 'Datas', lines: datas.length ? datas.map((dt) => `${dt} (${quando(dt)})`) : [NAO_LOC] },
@@ -692,7 +693,7 @@ export function useAI() {
         if (comTexto.length === 1) return summarizeDocument(comTexto[0].id, p.numero);
         return R({ kind: 'ambiguidade', confidence: 'baixa', text: 'Há mais de um documento neste processo. Selecione qual deseja resumir.', choices: p.documentos.map((d) => ({ label: d.nome, hint: `${d.tipo} · ${d.data}${d.conteudo ? '' : ' · sem texto extraído'}`, query: `Resumir documento #${d.id}` })) });
       }
-      if (/insight/.test(q)) return insightProcess(p);
+      if (/insight|pontos para revisar|pontos de atenc/.test(q)) return insightProcess(p);
       if (/analis|analise/.test(q)) return analyzeProcess(p);
       if (/resum/.test(q)) return summarizeProcess(p);
 
@@ -744,7 +745,14 @@ export function useAI() {
           text: `Há ${plural(pend.length, 'prazo em aberto', 'prazos em aberto')} neste processo, do mais urgente ao mais distante.`,
           lines: pend.map((x) => `${x.descricao}: ${x.data} (${diasAte(x.data) < 0 ? `vencido ${quando(x.data)}` : quando(x.data)}), ${x.responsavel}, prioridade ${x.prioridade}.`),
           sources: pend.map((x) => srcPrazo(p.numero, x)),
-          actions: [{ label: `Concluir "${pend[0].descricao}"`, run: () => store.dispatch({ type: 'setPrazoStatus', numero: p.numero, prazoId: pend[0].id, status: 'concluido' }) }],
+          actions: [{ label: `Concluir "${pend[0].descricao}"`, run: () => {
+            void completeProcessDeadline(pend[0].id)
+              .then(() => {
+                store.dispatch({ type: 'setPrazoStatus', numero: p.numero, prazoId: pend[0].id, status: 'concluido' });
+                return store.refreshWorkspace(store.user.id);
+              })
+              .catch(() => undefined);
+          } }],
         });
       }
       if (/pend[eê]nc|revis|importante|atencao/.test(q)) {
