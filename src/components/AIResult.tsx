@@ -18,8 +18,8 @@ const KIND: Partial<Record<AIResult['kind'], { label: string; Icon: typeof Spark
   indisponivel: { label: 'Serviço indisponível', Icon: PowerOff, cls: 'text-[var(--color-danger)]' },
 };
 
-/** Estado "processando" compartilhado. */
-export function AIWorking({ label = 'Consultando os registros…' }: { label?: string }) {
+/** Estado de análise local compartilhado. */
+export function AIWorking({ label = 'Analisando registros locais…' }: { label?: string }) {
   return (
     <div className="flex items-center gap-2.5 rounded-md border border-line bg-white px-3.5 py-3 text-[13px] text-muted">
       <span className="juris-dot-typing flex gap-1" aria-hidden><span /><span /><span /></span>
@@ -32,7 +32,7 @@ export function AIWorking({ label = 'Consultando os registros…' }: { label?: s
 export function AIFailed({ retry, manual }: { retry: () => void; manual?: string }) {
   return (
     <div className="rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/6 px-3.5 py-3 text-[13px]">
-      <p className="font-medium text-[var(--color-danger)]">Não foi possível consultar o assistente neste momento.</p>
+      <p className="font-medium text-[var(--color-danger)]">Não foi possível concluir a análise local neste momento.</p>
       <p className="mt-0.5 text-muted">Isso não significa que não existam registros.</p>
       <div className="mt-2 flex gap-4">
         <button onClick={retry} className="inline-flex items-center gap-1.5 font-medium text-[var(--color-teal)] hover:underline"><RotateCw size={13} /> Tentar novamente</button>
@@ -67,7 +67,7 @@ export function AIResultView({
   return (
     <div className={cx('overflow-hidden bg-white', !flat && 'rounded-md border border-line')}>
       <div className="flex items-center justify-between border-b border-line px-3.5 py-2">
-        <span className="eyebrow flex items-center gap-1.5 text-[var(--color-teal)]"><Sparkles size={11} /> Gerado por IA</span>
+        <span className="eyebrow flex items-center gap-1.5 text-[var(--color-teal)]"><Sparkles size={11} /> Análise local</span>
         <span className={cx('flex items-center gap-1 text-[11px] font-medium', conf.cls)}>
           {k && <k.Icon size={12} />} {conf.label}
         </span>
@@ -82,7 +82,7 @@ export function AIResultView({
         {result.sections?.map((s) => <Section key={s.title} s={s} onNavigate={onNavigate} />)}
 
         {result.insights && result.insights.length > 0 && (
-          <Section s={{ title: 'Insight da IA', tone: 'insight', ...(result.insights.length === 1 ? { body: result.insights[0] } : { lines: result.insights }) }} />
+          <Section s={{ title: 'Pontos para revisar', tone: 'insight', ...(result.insights.length === 1 ? { body: result.insights[0] } : { lines: result.insights }) }} />
         )}
 
         {open && more.map((s) => <Section key={s.title} s={s} />)}
@@ -142,7 +142,7 @@ export function AIResultView({
 
       <div className="border-t border-line px-3.5 py-1.5">
         <p className="text-[10.5px] text-[var(--color-faint)]">
-          {at ? `Gerado em ${at} · ` : ''}Baseado apenas em registros do JurisCore. Não constitui parecer jurídico.
+          {at ? `Analisado em ${at} · ` : ''}Baseado em registros desta conta e regras locais. Não usa modelo generativo nem envia dados a serviço externo. Não constitui parecer jurídico.
         </p>
       </div>
     </div>
@@ -171,7 +171,7 @@ function Section({ s, onNavigate }: { s: AISection; onNavigate?: () => void }) {
         <p className="eyebrow mb-1 flex items-center gap-1.5 text-[var(--color-teal)]"><Lightbulb size={11} /> {s.title}</p>
         {s.body && <p className="text-[12.5px] leading-relaxed text-ink">{s.body}</p>}
         {s.lines && <ul className="space-y-1.5 text-[12.5px] leading-relaxed text-ink">{s.lines.map((t, i) => <li key={i}>{t}</li>)}</ul>}
-        <p className="mt-2 text-[11.5px] text-muted">Gerado por IA. Revise antes de utilizar na condução do caso.</p>
+        <p className="mt-2 text-[11.5px] text-muted">Sugestão automática baseada em regras locais. Revise antes de utilizar na condução do caso.</p>
       </div>
     );
   return (

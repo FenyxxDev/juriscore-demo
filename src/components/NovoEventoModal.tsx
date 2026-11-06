@@ -3,7 +3,8 @@ import { CalendarClock, CalendarDays, Gavel, ListChecks } from 'lucide-react';
 import { Button, Field, Input, Modal, Select, Textarea, cx, useToast } from './ui';
 import { useStore } from '../store';
 import type { Modalidade, Prioridade } from '../data';
-import { toneOf } from '../data';
+import { createProcessDeadline } from '../lib/processes';
+import { createCalendarAppointment, createProcessHearing, createProcessTask } from '../lib/schedule';
 
 export type EventoTipo = 'audiencia' | 'prazo' | 'tarefa' | 'compromisso';
 
@@ -15,13 +16,6 @@ const TIPOS: { id: EventoTipo; label: string; hint: string; Icon: typeof Gavel }
 ];
 
 const TIPOS_AUD = ['Audiência de conciliação', 'Audiência de instrução', 'Audiência una', 'Audiência de julgamento', 'Audiência de justificação'];
-
-/** "2026-10-04" + "14:30" -> "04/10/2026 · 14h30" */
-const toBR = (iso: string, hora?: string) => {
-  const [y, m, d] = iso.split('-');
-  const base = `${d}/${m}/${y}`;
-  return hora ? `${base} · ${hora.replace(':', 'h')}` : base;
-};
 
 export function NovoEventoModal({
   open,
@@ -41,9 +35,15 @@ export function NovoEventoModal({
 }
 
 function Form({ onClose, fixo, tipoInicial, dataInicial }: { onClose: () => void; fixo?: string; tipoInicial?: EventoTipo; dataInicial?: string }) {
-  const { processos, advogados, user, dispatch } = useStore();
+  const { processos, advogados, user, can, refreshWorkspace } = useStore();
   const toast = useToast();
   const [tipo, setTipo] = useState<EventoTipo | null>(tipoInicial ?? null);
+  const [saving, setSaving] = useState(false);
+  const availableTypes = TIPOS.filter(({ id }) =>
+    id === 'prazo' ? can('gerenciarPrazos') :
+      id === 'tarefa' ? can('distribuirTarefas') :
+        id === 'audiencia' ? can('agendarAudiencia') : true,
+  );
   const ativos = processos.filter((p) => !p.arquivado);
   const [numero, setNumero] = useState(fixo ?? '');
   const proc = processos.find((p) => p.numero === numero);
@@ -63,7 +63,7 @@ function Form({ onClose, fixo, tipoInicial, dataInicial }: { onClose: () => void
   const [err, setErr] = useState<Record<string, string>>({});
   const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }));
 
-  function salvar() {
+  async function salvar() {
     const e: Record<string, string> = {};
     const precisaProc = tipo === 'audiencia' || tipo === 'prazo' || tipo === 'tarefa';
     if (precisaProc && !numero) e.numero = 'Selecione o processo.';
@@ -74,25 +74,33 @@ function Form({ onClose, fixo, tipoInicial, dataInicial }: { onClose: () => void
     setErr(e);
     if (Object.keys(e).length || !tipo) return;
 
-    if (tipo === 'audiencia') {
-      dispatch({
-        type: 'addAudiencia',
-        numero,
-        audiencia: { tipo: f.tipoAud, data: toBR(f.data, f.hora), modalidade: f.modalidade, local: f.local.trim(), participantes: f.participantes.trim() || undefined, responsavel: f.responsavel, observacoes: f.observacoes.trim() || undefined },
-      });
-      toast({ tone: 'success', message: 'Audiência agendada. Ela aparece na agenda, no processo e gera lembrete.' });
-    } else if (tipo === 'prazo') {
-      const data = toBR(f.data);
-      dispatch({ type: 'addPrazo', numero, prazo: { descricao: f.titulo.trim(), data, tone: toneOf(data), responsavel: f.responsavel, prioridade: f.prioridade } });
-      toast({ tone: 'success', message: 'Prazo cadastrado.' });
-    } else if (tipo === 'tarefa') {
-      dispatch({ type: 'addTarefa', tarefa: { titulo: f.titulo.trim(), numero, cliente: proc?.cliente ?? '', responsavel: f.responsavel, prioridade: f.prioridade, data: toBR(f.data) } });
-      toast({ tone: 'success', message: `Tarefa atribuída a ${f.responsavel}.` });
-    } else {
-      dispatch({ type: 'addCompromisso', compromisso: { titulo: f.titulo.trim(), data: toBR(f.data, f.hora), local: f.local.trim() || 'A definir', responsavel: f.responsavel, numero: numero || undefined, observacoes: f.observacoes.trim() || undefined } });
-      toast({ tone: 'success', message: 'Compromisso adicionado à agenda.' });
+    if ((tipo === 'prazo' && !can('gerenciarPrazos')) || (tipo === 'tarefa' && !can('distribuirTarefas'))) {
+      toast({ tone: 'error', message: 'Seu perfil não tem permissão para criar este item.' });
+      return;
     }
-    onClose();
+
+    setSaving(true);
+    try {
+      if (tipo === 'audiencia') {
+        await createProcessHearing({ numero, tipo: f.tipoAud, data: f.data, hora: f.hora, modalidade: f.modalidade, local: f.local.trim(), participantes: f.participantes, responsavel: f.responsavel, observacoes: f.observacoes });
+        toast({ tone: 'success', message: 'Audiência agendada e salva no processo.' });
+      } else if (tipo === 'prazo') {
+        await createProcessDeadline(numero, { descricao: f.titulo.trim(), data: f.data, responsavel: f.responsavel, prioridade: f.prioridade });
+        toast({ tone: 'success', message: 'Prazo cadastrado.' });
+      } else if (tipo === 'tarefa') {
+        await createProcessTask({ numero, titulo: f.titulo.trim(), data: f.data, responsavel: f.responsavel, prioridade: f.prioridade });
+        toast({ tone: 'success', message: `Tarefa atribuída a ${f.responsavel}.` });
+      } else {
+        await createCalendarAppointment({ numero: numero || undefined, titulo: f.titulo.trim(), data: f.data, hora: f.hora || undefined, local: f.local.trim() || 'A definir', responsavel: f.responsavel, observacoes: f.observacoes });
+        toast({ tone: 'success', message: 'Compromisso salvo na agenda.' });
+      }
+      onClose();
+      void refreshWorkspace(user.id).catch(() => toast({ tone: 'error', message: 'O item foi salvo, mas a lista não pôde ser atualizada. Atualize a página.' }));
+    } catch (saveError) {
+      toast({ tone: 'error', message: saveError instanceof Error ? saveError.message : 'Não foi possível salvar o item.' });
+    } finally {
+      setSaving(false);
+    }
   }
 
   const titulo = !tipo ? 'Novo compromisso ou audiência' : { audiencia: 'Nova audiência', prazo: 'Novo prazo', tarefa: 'Nova tarefa', compromisso: 'Novo compromisso' }[tipo];
@@ -100,7 +108,7 @@ function Form({ onClose, fixo, tipoInicial, dataInicial }: { onClose: () => void
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={() => { if (!saving) onClose(); }}
       size="lg"
       title={titulo}
       description={tipo ? undefined : 'Escolha o tipo de item.'}
@@ -108,15 +116,15 @@ function Form({ onClose, fixo, tipoInicial, dataInicial }: { onClose: () => void
         tipo && (
           <>
             {!tipoInicial && <Button variant="ghost" className="mr-auto" onClick={() => setTipo(null)}>Trocar tipo</Button>}
-            <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-            <Button onClick={salvar}>Salvar</Button>
+            <Button variant="secondary" disabled={saving} onClick={onClose}>Cancelar</Button>
+            <Button onClick={() => { void salvar(); }} loading={saving}>Salvar</Button>
           </>
         )
       }
     >
       {!tipo ? (
         <div className="grid gap-2.5 sm:grid-cols-2">
-          {TIPOS.map(({ id, label, hint, Icon }) => (
+          {availableTypes.map(({ id, label, hint, Icon }) => (
             <button key={id} onClick={() => setTipo(id)} className="flex items-center gap-3 rounded-md border border-line-strong px-4 py-3.5 text-left transition-colors hover:border-[var(--color-teal)] hover:bg-[var(--color-teal)]/4">
               <Icon size={18} className="text-[var(--color-teal)]" />
               <span>

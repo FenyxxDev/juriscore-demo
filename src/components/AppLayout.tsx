@@ -18,7 +18,7 @@ import {
   Users,
   UsersRound,
 } from 'lucide-react';
-import { Avatar, cx } from './ui';
+import { Avatar, cx, useToast } from './ui';
 import { AssistantProvider } from './Assistant';
 import type { Perfil } from '../data';
 import { useStore } from '../store';
@@ -27,7 +27,41 @@ import { supabase } from '../lib/supabase';
 type NavItem = { to: string; label: string; icon: typeof Bell; roles?: Perfil[] };
 
 const navGroups: { heading: string; items: NavItem[] }[] = [
-  { heading: 'Gestão', items: [{ to: '/clientes', label: 'Clientes', icon: Users }] },
+  {
+    heading: 'Gestão',
+    items: [
+      { to: '/dashboard', label: 'Dashboard', icon: Scale },
+      { to: '/processos', label: 'Processos', icon: Scale },
+      { to: '/clientes', label: 'Clientes', icon: Users },
+    ],
+  },
+  {
+    heading: 'Acompanhamento',
+    items: [
+      { to: '/agenda', label: 'Agenda', icon: CalendarDays },
+      { to: '/prazos', label: 'Prazos', icon: ListChecks },
+      { to: '/tarefas', label: 'Tarefas', icon: CheckSquare },
+      { to: '/audiencias', label: 'Audiências', icon: Gavel },
+    ],
+  },
+  {
+    heading: 'Acervo',
+    items: [
+      { to: '/documentos', label: 'Documentos', icon: FileText },
+      { to: '/pesquisa', label: 'Pesquisa', icon: Search },
+    ],
+  },
+  {
+    heading: 'Administração',
+    items: [
+      { to: '/usuarios', label: 'Usuários', icon: UsersRound, roles: ['Administrador'] },
+      { to: '/admin/auditoria-acessos', label: 'Acesso da conta', icon: ShieldCheck, roles: ['Administrador'] },
+      { to: '/equipe', label: 'Perfil profissional', icon: Users },
+      { to: '/advogado/mesa-analise', label: 'Mesa de análise', icon: Gavel, roles: ['Advogado'] },
+      { to: '/assistente/triagem', label: 'Triagem de solicitações', icon: FileText, roles: ['Assistente'] },
+      { to: '/configuracoes', label: 'Configurações', icon: Settings },
+    ],
+  },
 ];
 
 function SidebarItem({ to, label, Icon }: { to: string; label: string; Icon: typeof Bell }) {
@@ -125,8 +159,9 @@ function RoleSwitcher() {
 }
 
 function Notificacoes() {
-  const { notificacoes, naoLidas, dispatch } = useStore();
+  const { notificacoes, naoLidas, saveReadNotifications } = useStore();
   const navigate = useNavigate();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const list = notificacoes;
 
@@ -155,7 +190,7 @@ function Notificacoes() {
             </div>
             <button
               disabled={!naoLidas}
-              onClick={() => dispatch({ type: 'markAllRead', ids: notificacoes.map((n) => n.id) })}
+              onClick={() => { void saveReadNotifications(notificacoes.map((n) => n.id)).catch((error) => toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível guardar as notificações.' })); }}
               className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-medium text-[var(--color-teal)] hover:bg-slate-50 disabled:text-[var(--color-faint)] disabled:hover:bg-transparent"
             >
               <CheckCheck size={14} /> Marcar todas como lidas
@@ -171,7 +206,7 @@ function Notificacoes() {
                 <button
                   className="min-w-0 flex-1 text-left"
                   onClick={() => {
-                    dispatch({ type: 'markRead', id: n.id });
+                    void saveReadNotifications([n.id]).catch((error) => toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível guardar a notificação.' }));
                     setOpen(false);
                     navigate(n.to);
                   }}
@@ -182,7 +217,7 @@ function Notificacoes() {
                 </button>
                 {!n.lida && (
                   <button
-                    onClick={() => dispatch({ type: 'markRead', id: n.id })}
+                    onClick={() => { void saveReadNotifications([n.id]).catch((error) => toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível guardar a notificação.' })); }}
                     aria-label="Marcar como lida"
                     title="Marcar como lida"
                     className="h-7 w-7 shrink-0 rounded-md text-[var(--color-faint)] hover:bg-slate-100 hover:text-ink"
@@ -218,7 +253,7 @@ function Topbar() {
     // O logout remoto é melhor-effort e tem limite de tempo para não travar a aplicação.
     if (supabase) {
       void Promise.race([
-        supabase.auth.signOut(),
+        supabase.auth.signOut({ scope: 'local' }),
         new Promise((resolve) => window.setTimeout(resolve, 2500)),
       ]).catch(() => undefined);
     }
@@ -256,7 +291,7 @@ function Topbar() {
 
       <div className="ml-auto flex items-center gap-1.5">
         <Notificacoes />
-        <NavLink to="/dashboard" aria-label="Dashboard" className="rounded-md p-2 text-muted transition-colors hover:bg-slate-100 hover:text-ink">
+        <NavLink to="/configuracoes" aria-label="Configurações" className="rounded-md p-2 text-muted transition-colors hover:bg-slate-100 hover:text-ink">
           <Settings size={18} strokeWidth={1.75} />
         </NavLink>
         <button

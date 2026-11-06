@@ -1,9 +1,9 @@
 import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router';
 import { Mail, PencilLine, Phone } from 'lucide-react';
-import { AreaList, AreaPicker, AreaTag } from './Areas';
-import { Avatar, Button, Field, Input, Modal, Select, StatusBadge, Tabs, cx, useToast } from './ui';
-import { type Advogado, PERFIS, type Perfil, UFS, diasAte } from '../data';
+import { AreaList, AreaTag } from './Areas';
+import { Avatar, Modal, StatusBadge, Tabs, cx } from './ui';
+import { type Advogado, type Perfil, diasAte } from '../data';
 import { PERMISSOES, procLink, useStore } from '../store';
 
 export const perfilLabel = (p: Perfil) => (p === 'Administrador' ? 'Administrador ou Gestor' : p === 'Assistente' ? 'Assistente jurídico' : 'Advogado');
@@ -16,11 +16,9 @@ export function processosDo(m: Advogado, todos: ReturnType<typeof useStore>['tod
 }
 
 export function MembroDetalhe({ membro, onClose }: { membro: Advogado; onClose: () => void }) {
-  const { todosProcessos, clientes, tarefas, can, user, dispatch } = useStore();
-  const toast = useToast();
+  const { todosProcessos, clientes, tarefas, user } = useStore();
   const [tab, setTab] = useState('Visão geral');
-  const [editing, setEditing] = useState(false);
-  const podeEditar = can('gerenciarUsuarios') || user.id === membro.id;
+  const podeEditar = user.id === membro.id;
 
   const procs = processosDo(membro, todosProcessos).filter((p) => !p.arquivado);
   const clis = clientes.filter((c) => procs.some((p) => p.clienteId === c.id));
@@ -35,19 +33,7 @@ export function MembroDetalhe({ membro, onClose }: { membro: Advogado; onClose: 
 
   return (
     <Modal open onClose={onClose} title={membro.nome} description={perfilLabel(membro.perfil)} size="lg">
-      {editing ? (
-        <EditarMembro
-          membro={membro}
-          adminMode={can('gerenciarUsuarios')}
-          onCancel={() => setEditing(false)}
-          onSave={(patch) => {
-            dispatch({ type: 'updateUsuario', id: membro.id, patch });
-            toast({ tone: 'success', message: 'Informações atualizadas.' });
-            setEditing(false);
-          }}
-        />
-      ) : (
-        <>
+      <>
           <div className="flex flex-wrap items-start gap-4">
             <Avatar name={membro.nome} size={52} />
             <div className="min-w-0 flex-1">
@@ -61,9 +47,9 @@ export function MembroDetalhe({ membro, onClose }: { membro: Advogado; onClose: 
               </div>
             </div>
             {podeEditar && (
-              <Button size="sm" variant="secondary" icon={<PencilLine size={14} />} onClick={() => setEditing(true)}>
-                Editar
-              </Button>
+              <Link to="/configuracoes?tab=perfil" onClick={onClose} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line px-3 text-[12px] font-medium text-muted hover:bg-subtle hover:text-ink">
+                <PencilLine size={14} /> Editar meu perfil
+              </Link>
             )}
           </div>
 
@@ -170,107 +156,8 @@ export function MembroDetalhe({ membro, onClose }: { membro: Advogado; onClose: 
             )}
           </div>
 
-          {can('gerenciarUsuarios') && user.id !== membro.id && (
-            <div className="mt-5 flex justify-end border-t border-line pt-4">
-              <Button
-                size="sm"
-                variant={membro.ativo ? 'ghost' : 'secondary'}
-                onClick={() => {
-                  dispatch({ type: 'toggleUsuario', id: membro.id });
-                  toast({ tone: 'success', message: membro.ativo ? 'Acesso desativado.' : 'Acesso reativado.' });
-                }}
-              >
-                {membro.ativo ? 'Desativar acesso' : 'Reativar acesso'}
-              </Button>
-            </div>
-          )}
-        </>
-      )}
+      </>
     </Modal>
-  );
-}
-
-function EditarMembro({
-  membro,
-  adminMode,
-  onCancel,
-  onSave,
-}: {
-  membro: Advogado;
-  adminMode: boolean;
-  onCancel: () => void;
-  onSave: (patch: Partial<Advogado>) => void;
-}) {
-  const { advogados } = useStore();
-  const [f, setF] = useState({ ...membro, oabNum: membro.oab.replace(/\D/g, '') });
-  const [err, setErr] = useState('');
-  return (
-    <form
-      className="space-y-4"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!f.nome.trim()) return setErr('Informe o nome.');
-        const { oabNum, ...rest } = f;
-        onSave({
-          ...rest,
-          nome: f.nome.trim(),
-          oab: f.perfil === 'Advogado' && oabNum ? `OAB/${f.oabUf ?? 'PE'} ${oabNum.replace(/(\d)(?=(\d{3})+$)/, '$1.')}` : f.perfil === 'Advogado' ? '' : membro.oab,
-        });
-      }}
-    >
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Nome completo" error={err}>
-          <Input value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} />
-        </Field>
-        <Field label="Telefone">
-          <Input value={f.telefone} onChange={(e) => setF({ ...f, telefone: e.target.value })} />
-        </Field>
-        <Field label="Perfil" hint={adminMode ? 'Alterar o perfil muda permissões e dashboard.' : 'Somente o administrador altera o perfil.'}>
-          <Select className="h-9.5 w-full" value={f.perfil} disabled={!adminMode} onChange={(e) => setF({ ...f, perfil: e.target.value as Perfil })}>
-            {PERFIS.map((p) => <option key={p} value={p}>{perfilLabel(p)}</option>)}
-          </Select>
-        </Field>
-        {f.perfil === 'Advogado' && (
-          <div className="grid grid-cols-[1fr_84px] gap-2">
-            <Field label="OAB">
-              <Input className="ident" value={f.oabNum} onChange={(e) => setF({ ...f, oabNum: e.target.value })} />
-            </Field>
-            <Field label="UF">
-              <Select className="h-9.5 w-full" value={f.oabUf ?? 'PE'} onChange={(e) => setF({ ...f, oabUf: e.target.value })}>
-                {UFS.map((u) => <option key={u}>{u}</option>)}
-              </Select>
-            </Field>
-          </div>
-        )}
-        {f.perfil === 'Advogado' && (
-          <Field label="Especialidade">
-            <Input value={f.especialidade ?? ''} onChange={(e) => setF({ ...f, especialidade: e.target.value })} />
-          </Field>
-        )}
-        {f.perfil === 'Assistente' && (
-          <Field label="Advogado responsável">
-            <Select className="h-9.5 w-full" value={f.equipe ?? ''} onChange={(e) => setF({ ...f, equipe: e.target.value })}>
-              <option value="">Selecione</option>
-              {advogados.filter((a) => a.perfil === 'Advogado').map((a) => <option key={a.id}>{a.nome}</option>)}
-            </Select>
-          </Field>
-        )}
-        {f.perfil === 'Administrador' && (
-          <Field label="Cargo">
-            <Input value={f.cargo ?? ''} onChange={(e) => setF({ ...f, cargo: e.target.value })} />
-          </Field>
-        )}
-      </div>
-      {f.perfil !== 'Administrador' && (
-        <Field label="Áreas jurídicas">
-          <AreaPicker value={f.areas} onChange={(areas) => setF({ ...f, areas })} />
-        </Field>
-      )}
-      <div className="flex justify-end gap-2 border-t border-line pt-4">
-        <Button type="button" variant="secondary" onClick={onCancel}>Cancelar</Button>
-        <Button type="submit">Salvar alterações</Button>
-      </div>
-    </form>
   );
 }
 
