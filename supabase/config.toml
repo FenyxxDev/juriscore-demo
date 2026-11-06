@@ -1,0 +1,2 @@
+[functions.datajud-consulta]
+verify_jwt = true
