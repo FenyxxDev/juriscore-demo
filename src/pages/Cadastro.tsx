@@ -173,7 +173,7 @@ export function Cadastro() {
     }
 
     if (data.session && data.user && perfil !== 'Advogado') {
-      const { error: signOutError } = await supabase.auth.signOut();
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
       setLoading(false);
       if (signOutError) {
         toast({ tone: 'error', message: 'A conta foi criada, mas não foi possível encerrar a sessão. Tente entrar novamente após a aprovação.' });

@@ -251,8 +251,8 @@ function AdminView({ store }: { store: Store }) {
         <Panel title="Processos por área jurídica" subtitle="Onde está o volume?" to="/processos">
           <HBars data={stats.porArea} to={() => '/processos'} max={5} />
         </Panel>
-        <Panel title="Distribuição por responsável" subtitle="A carga está equilibrada?" to="/equipe" linkLabel="Ver equipe">
-          <HBars data={stats.porResponsavel.map((r) => ({ ...r, flag: sobrecarga(r.n) }))} to={() => '/equipe'} max={5} />
+        <Panel title="Processos por responsável" subtitle="Distribuição na carteira desta conta." to="/processos" linkLabel="Ver processos">
+          <HBars data={stats.porResponsavel.map((r) => ({ ...r, flag: sobrecarga(r.n) }))} to={() => '/processos'} max={5} />
         </Panel>
       </div>
       <AttentionStrip title="Atenção da operação" items={alertas} empty="Nenhum evento exige intervenção agora." />

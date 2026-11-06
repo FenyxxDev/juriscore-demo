@@ -1,13 +1,13 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { Check, LaptopMinimal, LogOut, Minus, Smartphone } from 'lucide-react';
+import { Check, LogOut, Minus } from 'lucide-react';
 import { Avatar, Button, Card, Field, Input, PanelHeader, Segmented, Select, Tabs, cx, useToast } from '../components/ui';
 import { AreaList, AreaPicker } from '../components/Areas';
 import { perfilLabel } from '../components/MembroDetalhe';
 import { EMAIL_RE, PasswordInput } from './Login';
 import { SenhaMeter, forcaSenha } from './Cadastro';
 import { PERFIS, UFS } from '../data';
-import { NOTIF_CATEGORIAS, PERMISSOES, useStore } from '../store';
+import { NOTIF_CATEGORIAS, PERMISSOES, type Preferencias, useStore } from '../store';
 import { supabase } from '../lib/supabase';
 
 const TABS = [
@@ -82,10 +82,11 @@ function PerfilTab() {
   const toast = useToast();
   const [f, setF] = useState({ nome: user.nome, email: user.email, telefone: user.telefone ?? '', oab: user.oab ?? '', oabUf: user.oabUf ?? 'SP', areas: user.areas, cargo: user.cargo ?? '', especialidade: user.especialidade ?? '' });
   const [err, setErr] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof f, v: string | string[]) => setF((s) => ({ ...s, [k]: v }));
   const isAdv = user.perfil === 'Advogado';
 
-  function salvar() {
+  async function salvar() {
     const e: Record<string, string> = {};
     if (!f.nome.trim()) e.nome = 'Informe seu nome.';
     if (!EMAIL_RE.test(f.email)) e.email = 'E-mail inválido.';
@@ -94,8 +95,33 @@ function PerfilTab() {
     if (user.perfil !== 'Administrador' && !f.areas.length) e.areas = 'Selecione ao menos uma área.';
     setErr(e);
     if (Object.keys(e).length) return;
-    dispatch({ type: 'updateUsuario', id: user.id, patch: { ...f, oab: isAdv ? f.oab : user.oab } });
-    toast({ tone: 'success', message: 'Perfil atualizado.' });
+    if (!supabase) {
+      toast({ tone: 'error', message: 'Supabase não está configurado.' });
+      return;
+    }
+    setSaving(true);
+    const emailChanged = f.email.toLowerCase() !== user.email.toLowerCase();
+    try {
+      const { error } = await supabase.auth.updateUser({
+        ...(emailChanged ? { email: f.email.trim() } : {}),
+        data: {
+          nome: f.nome.trim(),
+          telefone: f.telefone.trim(),
+          oab: isAdv ? f.oab.trim() : user.oab,
+          oabUf: f.oabUf,
+          areas: f.areas,
+          cargo: f.cargo.trim(),
+          especialidade: f.especialidade.trim(),
+        },
+      });
+      if (error) throw error;
+      dispatch({ type: 'updateUsuario', id: user.id, patch: { ...f, email: emailChanged ? user.email : f.email.trim(), oab: isAdv ? f.oab.trim() : user.oab } });
+      toast({ tone: 'success', message: emailChanged ? 'Perfil atualizado. Confirme o link enviado para concluir a alteração do e-mail.' : 'Perfil atualizado.' });
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível salvar o perfil.' });
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -132,7 +158,7 @@ function PerfilTab() {
             </div>
           )}
         </div>
-        <div className="flex justify-end border-t border-line px-5 py-3.5"><Button onClick={salvar}>Salvar alterações</Button></div>
+        <div className="flex justify-end border-t border-line px-5 py-3.5"><Button loading={saving} onClick={() => { void salvar(); }}>Salvar alterações</Button></div>
       </Card>
     </div>
   );
@@ -141,23 +167,66 @@ function PerfilTab() {
 /* ------------------------------------------------------------- Segurança */
 
 function SegurancaTab() {
-  const { user, sessoes, dispatch } = useStore();
   const toast = useToast();
+  const [encerrandoSessoes, setEncerrandoSessoes] = useState(false);
+  async function encerrarSessoes() {
+    if (!supabase) {
+      toast({ tone: 'error', message: 'O Supabase não está configurado.' });
+      return;
+    }
+    if (!window.confirm('Encerrar todas as sessões desta conta, incluindo este dispositivo? Será necessário iniciar sessão novamente.')) return;
+    setEncerrandoSessoes(true);
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'global' });
+      if (error) throw error;
+      toast({ tone: 'success', message: 'Todas as sessões foram encerradas.' });
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível encerrar as sessões.' });
+    } finally {
+      setEncerrandoSessoes(false);
+    }
+  }
   const [atual, setAtual] = useState('');
   const [nova, setNova] = useState('');
   const [conf, setConf] = useState('');
   const [err, setErr] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
 
-  function trocar() {
+  async function trocar() {
     const e: Record<string, string> = {};
-    if (atual !== user.senha) e.atual = 'Senha atual incorreta.';
+    if (!atual) e.atual = 'Informe sua senha atual.';
     if (forcaSenha(nova) < 3) e.nova = 'Use ao menos 8 caracteres, com letras, números e um símbolo.';
     if (nova !== conf) e.conf = 'As senhas não coincidem.';
     setErr(e);
     if (Object.keys(e).length) return;
-    dispatch({ type: 'updateUsuario', id: user.id, patch: { senha: nova } });
-    setAtual(''); setNova(''); setConf('');
-    toast({ tone: 'success', message: 'Senha alterada.' });
+    if (!supabase) {
+      setErr({ sistema: 'O Supabase não está configurado. A senha não foi alterada.' });
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data: current, error: currentError } = await supabase.auth.getUser();
+      if (currentError || !current.user?.email) {
+        setErr({ sistema: 'Sua sessão expirou. Entre novamente antes de alterar a senha.' });
+        return;
+      }
+      const { error: verificationError } = await supabase.auth.signInWithPassword({ email: current.user.email, password: atual });
+      if (verificationError) {
+        setErr({ atual: 'Senha atual incorreta.' });
+        return;
+      }
+      const { error: updateError } = await supabase.auth.updateUser({ password: nova });
+      if (updateError) {
+        setErr({ sistema: updateError.message || 'Não foi possível alterar a senha.' });
+        return;
+      }
+      setAtual(''); setNova(''); setConf('');
+      toast({ tone: 'success', message: 'Senha alterada na conta.' });
+    } catch {
+      setErr({ sistema: 'Não foi possível alterar a senha. Verifique a conexão e tente novamente.' });
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -165,31 +234,21 @@ function SegurancaTab() {
       <Card>
         <PanelHeader title="Alterar senha" />
         <div className="flex flex-col gap-4 p-5">
+          {err.sistema && <p role="alert" className="text-sm text-[var(--color-danger)]">{err.sistema}</p>}
           <Field label="Senha atual" htmlFor="s-a" error={err.atual}><PasswordInput id="s-a" value={atual} onChange={setAtual} invalid={!!err.atual} autoComplete="current-password" /></Field>
           <Field label="Nova senha" htmlFor="s-n" error={err.nova}><PasswordInput id="s-n" value={nova} onChange={setNova} invalid={!!err.nova} autoComplete="new-password" /></Field>
           {nova && <SenhaMeter senha={nova} />}
           <Field label="Confirmar nova senha" htmlFor="s-c" error={err.conf}><PasswordInput id="s-c" value={conf} onChange={setConf} invalid={!!err.conf} autoComplete="new-password" /></Field>
-          <div className="flex justify-end"><Button onClick={trocar}>Alterar senha</Button></div>
+          <div className="flex justify-end"><Button onClick={trocar} loading={loading}>Alterar senha</Button></div>
         </div>
       </Card>
       <Card>
         <PanelHeader
-          title="Sessões ativas"
-          subtitle={`${sessoes.length} dispositivo(s) conectados`}
-          action={<Button size="sm" variant="secondary" icon={<LogOut size={14} />} disabled={sessoes.length < 2} onClick={() => { dispatch({ type: 'endSessions' }); toast({ tone: 'success', message: 'As outras sessões foram encerradas.' }); }}>Sair de todas</Button>}
+          title="Sessões da conta"
+          subtitle="A lista de dispositivos não é fornecida por este painel."
+          action={<Button size="sm" variant="secondary" icon={<LogOut size={14} />} loading={encerrandoSessoes} onClick={() => { void encerrarSessoes(); }}>Encerrar todas</Button>}
         />
-        <ul>
-          {sessoes.map((s) => (
-            <li key={s.id} className="flex items-center gap-3 border-b border-line px-5 py-3 last:border-0">
-              {/celular|iphone|android/i.test(s.dispositivo) ? <Smartphone size={17} className="text-muted" /> : <LaptopMinimal size={17} className="text-muted" />}
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-ink">{s.dispositivo}</p>
-                <p className="text-[12.5px] text-muted">{s.local} · desde {s.inicio}</p>
-              </div>
-              {s.atual && <span className="text-[12px] font-medium text-[var(--color-teal)]">Esta sessão</span>}
-            </li>
-          ))}
-        </ul>
+        <p className="px-5 py-4 text-[13px] leading-6 text-muted">Esta ação revoga globalmente as sessões do Supabase Auth, incluindo a sessão atual. Confirme antes de continuar; terá de iniciar sessão novamente neste dispositivo.</p>
       </Card>
     </div>
   );
@@ -198,11 +257,10 @@ function SegurancaTab() {
 /* -------------------------------------------------------------- Usuários */
 
 function UsuariosTab() {
-  const { can, advogados } = useStore();
+  const { can, user } = useStore();
   const [emailSolicitado, setEmailSolicitado] = useState('');
   const [aprovando, setAprovando] = useState(false);
   const [resultadoAprovacao, setResultadoAprovacao] = useState<{ ok: boolean; mensagem: string } | null>(null);
-  const porPerfil = PERFIS.map((p) => ({ p, n: advogados.filter((a) => a.perfil === p && a.ativo).length }));
 
   async function aprovarSolicitacao(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -212,41 +270,33 @@ function UsuariosTab() {
     }
     setAprovando(true);
     setResultadoAprovacao(null);
-    try {
-      const { data, error } = await supabase.functions.invoke('aprovar-role', {
-        body: { email: emailSolicitado.trim().toLowerCase() },
+    const { data, error } = await supabase.functions.invoke('aprovar-role', {
+      body: { email: emailSolicitado.trim().toLowerCase() },
+    });
+    setAprovando(false);
+    if (error || data?.error) {
+      setResultadoAprovacao({
+        ok: false,
+        mensagem: data?.error ?? 'Não foi possível aprovar. Confirme se existe uma solicitação pendente e se a função segura está publicada.',
       });
-      if (error || data?.error) {
-        setResultadoAprovacao({
-          ok: false,
-          mensagem: data?.error ?? 'Não foi possível aprovar. Confirme se existe uma solicitação pendente e se a função está publicada.',
-        });
-        return;
-      }
-      setResultadoAprovacao({ ok: true, mensagem: `Perfil ${data.perfil} aprovado para ${data.email}.` });
-      setEmailSolicitado('');
-    } catch {
-      setResultadoAprovacao({ ok: false, mensagem: 'Falha de rede ao enviar a aprovação. Tente novamente.' });
-    } finally {
-      setAprovando(false);
+      return;
     }
+    setResultadoAprovacao({ ok: true, mensagem: `Perfil ${data.perfil} aprovado para ${data.email}.` });
+    setEmailSolicitado('');
   }
 
   return (
     <Card>
-      <PanelHeader
-        title="Usuários do escritório"
-        subtitle={`${advogados.filter((a) => a.ativo).length} ativos · ${advogados.filter((a) => !a.ativo).length} inativos`}
-        action={can('gerenciarUsuarios') ? <Link to="/usuarios"><Button size="sm">Gerenciar usuários</Button></Link> : undefined}
-      />
-      <div className="grid divide-x divide-line sm:grid-cols-3">
-        {porPerfil.map(({ p, n }) => (
-          <div key={p} className="px-5 py-4">
-            <p className="eyebrow">{perfilLabel(p)}</p>
-            <p className="tnum mt-1 text-[24px] font-semibold text-ink">{n}</p>
-          </div>
-        ))}
-      </div>
+        <PanelHeader
+          title="Acesso da conta"
+          subtitle="Cada login tem os próprios dados e permissões."
+          action={can('gerenciarUsuarios') ? <Link to="/usuarios"><Button size="sm">Ver resumo da conta</Button></Link> : undefined}
+        />
+        <div className="border-t border-line px-5 py-4">
+          <p className="eyebrow">Perfil ativo</p>
+          <p className="mt-1 text-[14px] font-medium text-ink">{perfilLabel(user.role)}</p>
+          <p className="mt-1 text-[12.5px] text-muted">A gestão de convites, partilha de registros e edição de perfis de outras contas ainda não está ativa.</p>
+        </div>
       {can('gerenciarUsuarios') && (
         <div className="border-t border-line px-5 py-4">
           <PanelHeader title="Aprovar solicitação de perfil" subtitle="A role só é aplicada pelo Supabase após validação administrativa." />
@@ -275,7 +325,7 @@ function UsuariosTab() {
       )}
       {!can('gerenciarUsuarios') && (
         <p className="border-t border-line px-5 py-3.5 text-[13px] text-muted">
-          Apenas administradores podem convidar usuários ou alterar perfis. Consulte a <Link to="/equipe" className="font-medium text-[var(--color-teal)] hover:underline">equipe</Link>.
+          Esta tela não permite consultar nem alterar dados de outras contas. Solicitações de perfil são avaliadas separadamente por um administrador.
         </p>
       )}
     </Card>
@@ -318,24 +368,27 @@ function PermissoesTab() {
 /* ---------------------------------------------------------- Notificações */
 
 function NotificacoesTab() {
-  const { notifPrefs, prefs, dispatch } = useStore();
+  const { notifPrefs, prefs, saveSettings } = useStore();
+  const toast = useToast();
+  const save = (p: Parameters<typeof saveSettings>[0], n: Parameters<typeof saveSettings>[1] = {}) =>
+    void saveSettings(p, n).catch((error) => toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível guardar a preferência.' }));
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
       <Card>
         <PanelHeader title="Categorias" subtitle="Escolha o que aparece no sino de notificações." />
         {NOTIF_CATEGORIAS.map((c) => (
           <Row key={c.id} label={c.label}>
-            <Toggle label={c.label} on={notifPrefs[c.id]} onChange={(on) => dispatch({ type: 'setNotifPref', categoria: c.id, on })} />
+            <Toggle label={c.label} on={notifPrefs[c.id]} onChange={(on) => save({}, { [c.id]: on })} />
           </Row>
         ))}
       </Card>
       <Card className="self-start">
-        <PanelHeader title="Entrega" />
-        <Row label="No aplicativo"><Toggle label="No aplicativo" on={prefs.canalApp} onChange={(v) => dispatch({ type: 'setPrefs', patch: { canalApp: v } })} /></Row>
-        <Row label="Por e-mail"><Toggle label="Por e-mail" on={prefs.canalEmail} onChange={(v) => dispatch({ type: 'setPrefs', patch: { canalEmail: v } })} /></Row>
-        <Row label="Resumo diário" hint="Enviado às 8h"><Toggle label="Resumo diário" on={prefs.resumoDiario} onChange={(v) => dispatch({ type: 'setPrefs', patch: { resumoDiario: v } })} /></Row>
+        <PanelHeader title="Entrega" subtitle="Preferências guardadas. Alertas por e-mail e resumo diário ainda não são enviados." />
+        <Row label="No aplicativo"><Toggle label="No aplicativo" on={prefs.canalApp} onChange={(v) => save({ canalApp: v })} /></Row>
+        <Row label="Por e-mail"><Toggle label="Por e-mail" on={prefs.canalEmail} onChange={(v) => save({ canalEmail: v })} /></Row>
+        <Row label="Resumo diário" hint="Configuração guardada; envio agendado ainda indisponível"><Toggle label="Resumo diário" on={prefs.resumoDiario} onChange={(v) => save({ resumoDiario: v })} /></Row>
         <Row label="Avisar prazos com">
-          <Select className="w-28" value={prefs.antecedenciaPrazo} onChange={(e) => dispatch({ type: 'setPrefs', patch: { antecedenciaPrazo: Number(e.target.value) } })}>
+          <Select className="w-28" value={prefs.antecedenciaPrazo} onChange={(e) => save({ antecedenciaPrazo: Number(e.target.value) })}>
             {[1, 3, 5, 7, 15].map((n) => <option key={n} value={n}>{n} dia{n > 1 && 's'}</option>)}
           </Select>
         </Row>
@@ -347,14 +400,17 @@ function NotificacoesTab() {
 /* ---------------------------------------------------------- Preferências */
 
 function PreferenciasTab() {
-  const { prefs, dispatch } = useStore();
+  const { prefs, saveSettings } = useStore();
+  const toast = useToast();
+  const save = (patch: Parameters<typeof saveSettings>[0]) =>
+    void saveSettings(patch).catch((error) => toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível guardar a preferência.' }));
   return (
     <Card className="max-w-[720px]">
-      <Row label="Assistente de IA" hint="Atua somente sobre os registros autorizados.">
-        <Toggle label="Assistente de IA" on={prefs.iaAtiva} onChange={(v) => dispatch({ type: 'setPrefs', patch: { iaAtiva: v } })} />
+      <Row label="Análise local do assistente" hint="Modo experimental baseado em regras e registros desta conta. Não usa modelo generativo nem serviço externo.">
+        <Toggle label="Análise local" on={prefs.iaAtiva} onChange={(v) => save({ iaAtiva: v })} />
       </Row>
       <Row label="Visualização padrão da agenda">
-        <Segmented size="sm" value={prefs.agendaVisao} onChange={(v) => dispatch({ type: 'setPrefs', patch: { agendaVisao: v } })} options={[{ value: 'dia', label: 'Dia' }, { value: 'semana', label: 'Semana' }, { value: 'mes', label: 'Mês' }]} />
+        <Segmented size="sm" value={prefs.agendaVisao} onChange={(v) => save({ agendaVisao: v })} options={[{ value: 'dia', label: 'Dia' }, { value: 'semana', label: 'Semana' }, { value: 'mes', label: 'Mês' }]} />
       </Row>
     </Card>
   );
@@ -365,17 +421,20 @@ function PreferenciasTab() {
 /* ---------------------------------------------------------- Distribuição */
 
 function DistribuicaoTab() {
-  const { advogados, processos, prefs, dispatch } = useStore();
+  const { advogados, processos, prefs, saveSettings } = useStore();
+  const toast = useToast();
+  const save = (distribuicao: Preferencias['distribuicao']) =>
+    void saveSettings({ distribuicao }).catch((error) => toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível guardar a preferência.' }));
   const ativos = processos.filter((p) => !p.arquivado && p.status !== 'encerrado');
   const equipe = advogados.filter((a) => a.ativo && a.perfil === 'Advogado');
   return (
     <div className="grid gap-5">
       <Card>
-        <Row label="Critério de distribuição" hint="Aplicado a novos processos.">
+        <Row label="Critério de distribuição" hint="Preferência guardada; distribuição automática ainda não está implementada.">
           <Segmented
             size="sm"
             value={prefs.distribuicao}
-            onChange={(v) => dispatch({ type: 'setPrefs', patch: { distribuicao: v } })}
+            onChange={save}
             options={[{ value: 'area', label: 'Por área' }, { value: 'carga', label: 'Por carga' }, { value: 'manual', label: 'Manual' }]}
           />
         </Row>
@@ -408,9 +467,10 @@ function DistribuicaoTab() {
 /* ------------------------------------------------------------ Escritório */
 
 function EscritorioTab() {
-  const { prefs, dispatch } = useStore();
+  const { prefs, saveSettings } = useStore();
   const toast = useToast();
   const [f, setF] = useState(prefs.escritorio);
+  useEffect(() => setF(prefs.escritorio), [prefs.escritorio]);
   return (
     <Card className="max-w-[720px]">
       <PanelHeader title="Dados do escritório" />
@@ -421,7 +481,7 @@ function EscritorioTab() {
         <div className="sm:col-span-2"><Field label="E-mail institucional" htmlFor="e-mail"><Input id="e-mail" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field></div>
       </div>
       <div className="flex justify-end border-t border-line px-5 py-3.5">
-        <Button onClick={() => { dispatch({ type: 'setPrefs', patch: { escritorio: f } }); toast({ tone: 'success', message: 'Dados do escritório atualizados.' }); }}>Salvar</Button>
+        <Button onClick={() => { void saveSettings({ escritorio: f }).then(() => toast({ tone: 'success', message: 'Dados do escritório guardados.' })).catch((error) => toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível guardar os dados.' })); }}>Salvar</Button>
       </div>
     </Card>
   );
