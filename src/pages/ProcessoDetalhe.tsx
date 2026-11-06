@@ -36,6 +36,7 @@ import { NovoEventoModal } from '../components/NovoEventoModal';
 import { procLink, useStore } from '../store';
 import { addProcessMovement, completeProcessDeadline, createProcessDeadline, getProcessByNumber, setProcessStatus, updateProcess } from '../lib/processes';
 import { downloadDocument, listDocumentsForCase } from '../lib/documents';
+import { consultarDataJud, type DataJudResult } from '../lib/datajud';
 import { type AIResult, useAI } from '../ai';
 import { AREAS, diasAte, type Prioridade } from '../data';
 
@@ -66,6 +67,8 @@ export function ProcessoDetalhe() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [reload, setReload] = useState(0);
+  const [dataJudLoading, setDataJudLoading] = useState(false);
+  const [dataJud, setDataJud] = useState<{ result: DataJudResult; consultedAt: string } | null>(null);
   useHighlight(item);
 
   useEffect(() => {
@@ -100,6 +103,22 @@ export function ProcessoDetalhe() {
       await downloadDocument(id);
     } catch (error) {
       toast({ tone: 'error', message: error instanceof Error ? error.message : `Não foi possível descarregar ${name}.` });
+    }
+  };
+  const handleDataJudConsult = async () => {
+    if (!proc.id) {
+      toast({ tone: 'error', message: 'Este processo não tem um identificador persistido para consulta segura.' });
+      return;
+    }
+    setDataJudLoading(true);
+    try {
+      const result = await consultarDataJud(proc.id);
+      setDataJud({ result, consultedAt: new Date().toLocaleString('pt-BR') });
+      toast({ tone: 'success', message: result.found ? 'Dados públicos recebidos do DataJud.' : 'O DataJud não encontrou correspondência pública.' });
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível consultar o DataJud.' });
+    } finally {
+      setDataJudLoading(false);
     }
   };
   const counts: Record<string, number> = {
@@ -138,6 +157,9 @@ export function ProcessoDetalhe() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" icon={<FileSearch size={16} />} loading={dataJudLoading} onClick={() => void handleDataJudConsult()}>
+            Consultar DataJud
+          </Button>
           {can('editarProcesso') && (
             <Button variant="secondary" icon={<PencilLine size={16} />} onClick={() => setModal('editar')}>
               Editar
@@ -160,6 +182,29 @@ export function ProcessoDetalhe() {
           ) : null}
         </div>
       </div>
+
+      <p className="mt-2 text-xs text-muted">A consulta é opcional. Ao solicitá-la, o número deste processo é enviado à API Pública DataJud do CNJ; a resposta não é guardada nem altera o seu registo.</p>
+
+      {dataJud && (
+        <Card className="mt-4 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">Dados públicos do DataJud</h2>
+              <p className="mt-1 text-xs text-muted">Consulta efetuada em {dataJud.consultedAt}. Estes dados não alteram o registo do processo.</p>
+            </div>
+            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-muted">Fonte: CNJ · DataJud</span>
+          </div>
+          {dataJud.result.found && dataJud.result.metadata ? (
+            <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div><dt className="text-xs text-muted">Classe processual</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.metadata.classe ?? 'Não informado'}</dd></div>
+              <div><dt className="text-xs text-muted">Data de ajuizamento</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.metadata.dataAjuizamento ?? 'Não informado'}</dd></div>
+              <div><dt className="text-xs text-muted">Grau</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.metadata.grau ?? 'Não informado'}</dd></div>
+            </dl>
+          ) : (
+            <p className="mt-4 text-sm text-muted">Não foi encontrada correspondência pública, ou não havia metadados permitidos para apresentar.</p>
+          )}
+        </Card>
+      )}
 
       <div className="mt-6">
         <Tabs tabs={TABS.map((t) => ({ id: t, label: t, count: counts[t] }))} active={tab} onChange={setTab} />
