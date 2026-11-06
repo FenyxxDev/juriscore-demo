@@ -1,22 +1,25 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { CheckSquare, Plus } from 'lucide-react';
-import { Button, Card, Metric, PriorityPill, SearchInput, Segmented, Select, StatusBadge, cx } from '../components/ui';
+import { Button, Card, Metric, PriorityPill, SearchInput, Segmented, Select, StatusBadge, cx, useToast } from '../components/ui';
 import { AreaTag } from '../components/Areas';
 import { NovoEventoModal } from '../components/NovoEventoModal';
 import { AREAS } from '../data';
 import { procLink, useStore } from '../store';
+import { setProcessTaskStatus } from '../lib/schedule';
 
 type Filtro = 'todas' | 'pendente' | 'atrasado' | 'concluido';
 const short = (n: string) => n.split('.')[0];
 
 export function Tarefas() {
-  const { tarefas, advogados, processos, dispatch, can } = useStore();
+  const { tarefas, advogados, processos, refreshWorkspace, user, can } = useStore();
+  const toast = useToast();
   const [filtro, setFiltro] = useState<Filtro>('todas');
   const [resp, setResp] = useState('todos');
   const [q, setQ] = useState('');
   const [area, setArea] = useState('todos');
   const [open, setOpen] = useState(false);
+  const [savingTask, setSavingTask] = useState<string | null>(null);
   const areaOf = useMemo(() => new Map(processos.map((p) => [p.numero, p.area])), [processos]);
 
   const rows = useMemo(
@@ -40,13 +43,26 @@ export function Tarefas() {
   };
   const responsaveis = advogados.filter((a) => a.perfil !== 'Assistente').map((a) => a.nome);
 
+  async function toggleTask(id: string, isDone: boolean) {
+    if (savingTask) return;
+    setSavingTask(id);
+    try {
+      await setProcessTaskStatus(id, isDone ? 'pendente' : 'concluido');
+      await refreshWorkspace(user.id);
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível atualizar a tarefa.' });
+    } finally {
+      setSavingTask(null);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[1200px] px-6 py-7 md:px-8">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="eyebrow">Acompanhamento</p>
           <h1 className="mt-1 text-[27px] font-semibold tracking-tight text-ink">Tarefas</h1>
-          <p className="mt-1 text-[13.5px] text-muted">Atividades internas vinculadas aos processos do escritório.</p>
+          <p className="mt-1 text-[13.5px] text-muted">Atividades internas vinculadas aos processos desta conta.</p>
         </div>
         {can('distribuirTarefas') && (
           <Button onClick={() => setOpen(true)} icon={<Plus size={16} />}>Nova tarefa</Button>
@@ -104,7 +120,8 @@ export function Tarefas() {
               return (
                 <li key={t.id} className="flex items-start gap-3.5 px-5 py-3.5">
                   <button
-                    onClick={() => dispatch({ type: 'toggleTarefa', id: t.id })}
+                    onClick={() => { void toggleTask(t.id, done); }}
+                    disabled={savingTask === t.id}
                     aria-label={done ? 'Reabrir tarefa' : 'Concluir tarefa'}
                     className={cx(
                       'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition-colors',

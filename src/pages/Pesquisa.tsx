@@ -10,7 +10,7 @@ import { areaCurta, diasAte } from '../data';
 
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const STOP = new Set(['quais', 'qual', 'processo', 'processos', 'cliente', 'clientes', 'possuem', 'prazo', 'prazos', 'esta', 'essa', 'semana', 'mostre', 'para', 'com', 'que', 'dos', 'das', 'meus', 'minhas', 'equipe', 'sem', 'atualizacao', 'recente', 'documentos', 'foram', 'adicionados', 'recentemente', 'estao', 'todos', 'onde', 'como', 'tem', 'hoje', 'direito', 'situacoes', 'situacao', 'semelhantes', 'similares', 'parecidos']);
-const EXEMPLOS = ['Quais processos do cliente João possuem prazo esta semana?', 'Quais processos estão sem atualização recente?', 'Quais documentos foram adicionados recentemente?', 'Mostre os processos trabalhistas da equipe.', 'Quais processos possuem situações semelhantes?'];
+const EXEMPLOS = ['Quais processos têm prazo esta semana?', 'Quais processos estão sem atualização recente?', 'Quais documentos foram adicionados recentemente?', 'Mostre os processos trabalhistas desta conta.', 'Quais processos possuem situações semelhantes?'];
 type IAState = { s: 'working' } | { s: 'done'; r: AIResult } | { s: 'error' } | null;
 
 export function Pesquisa() {
@@ -83,6 +83,7 @@ export function Pesquisa() {
       <header className="mb-6">
         <p className="eyebrow">Pesquisa</p>
         <h1 className="mt-1 text-[27px] font-semibold tracking-tight text-ink">Pergunte aos seus registros</h1>
+        <p className="mt-1 text-[12.5px] text-muted">As respostas usam regras locais e dados desta conta. Não há modelo generativo nem envio a serviços externos.</p>
       </header>
 
       <form
@@ -174,7 +175,7 @@ export function Pesquisa() {
       {/* Interpretação da IA */}
       {ia && (
         <div className="mb-6">
-          {ia.s === 'working' && <AIWorking label="Interpretando a pergunta nos registros autorizados…" />}
+          {ia.s === 'working' && <AIWorking label="Analisando a pergunta nos registros locais…" />}
           {ia.s === 'error' && <AIFailed retry={() => perguntar(submitted)} />}
           {ia.s === 'done' && <AIResultView result={ia.r} onChoose={(query) => run(query)} />}
         </div>

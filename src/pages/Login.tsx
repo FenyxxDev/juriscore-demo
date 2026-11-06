@@ -95,7 +95,7 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [senhaError, setSenhaError] = useState('');
-  const [erro, setErro] = useState<null | 'credenciais' | 'inativo'>(null);
+  const [erro, setErro] = useState<null | 'credenciais' | 'inativo' | 'aprovacao'>(null);
   const [recuperar, setRecuperar] = useState(false);
 
   if (authed) return <Navigate to="/dashboard" replace />;
@@ -120,6 +120,12 @@ export function Login() {
     }
     const metadata = data.user.user_metadata ?? {};
     const trustedPerfil = data.user.app_metadata?.perfil;
+    const perfilSolicitado = metadata.perfil_solicitado ?? metadata.perfil;
+    if (['Administrador', 'Assistente'].includes(perfilSolicitado) && trustedPerfil !== perfilSolicitado) {
+      await supabase.auth.signOut({ scope: 'local' });
+      setLoading(false);
+      return setErro('aprovacao');
+    }
     const perfil = ['Administrador', 'Advogado', 'Assistente'].includes(trustedPerfil)
       ? trustedPerfil as 'Administrador' | 'Advogado' | 'Assistente'
       : 'Advogado';
@@ -160,8 +166,15 @@ export function Login() {
 
       {erro && (
         <div className="mt-5">
-          <Alert tone="error" title={erro === 'credenciais' ? 'E-mail ou senha incorretos.' : 'Conta desativada.'}>
-            {erro === 'credenciais' ? 'Verifique os dados e tente novamente.' : 'Procure o administrador do escritório para reativar o acesso.'}
+          <Alert
+            tone="error"
+            title={erro === 'credenciais' ? 'E-mail ou senha incorretos.' : erro === 'inativo' ? 'Conta desativada.' : 'Solicitação de perfil aguardando aprovação.'}
+          >
+            {erro === 'credenciais'
+              ? 'Verifique os dados e tente novamente.'
+              : erro === 'inativo'
+                ? 'Procure o administrador do escritório para reativar o acesso.'
+                : 'Um administrador precisa aprovar o perfil solicitado antes de liberar o acesso. A escolha no cadastro, por si só, não concede permissões.'}
           </Alert>
         </div>
       )}
@@ -197,40 +210,55 @@ export function Login() {
         open
         initial={email}
         onClose={() => setRecuperar(false)}
-        onSent={(to) => {
+        onSent={async (to) => {
+          if (!supabase) throw new Error('O Supabase não está configurado.');
+          const { error } = await supabase.auth.resetPasswordForEmail(to.trim().toLowerCase(), {
+            redirectTo: window.location.origin,
+          });
+          if (error) throw error;
           setRecuperar(false);
-          toast({ tone: 'success', message: `Se houver uma conta para ${to}, enviaremos um link de redefinição.` });
+          toast({ tone: 'success', message: 'Se houver uma conta para esse e-mail, enviaremos um link de redefinição.' });
         }}
       />}
     </AuthShell>
   );
 }
 
-function RecuperarSenha({ open, initial, onClose, onSent }: { open: boolean; initial: string; onClose: () => void; onSent: (email: string) => void }) {
+function RecuperarSenha({ open, initial, onClose, onSent }: { open: boolean; initial: string; onClose: () => void; onSent: (email: string) => Promise<void> }) {
   const [email, setEmail] = useState(initial);
   const [err, setErr] = useState('');
+  const [sending, setSending] = useState(false);
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="Redefinir senha"
-      description="Enviaremos um link de redefinição para o e-mail cadastrado."
+      description="Se houver uma conta com esse e-mail, enviaremos um link de redefinição."
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" form="form-rec">Enviar link</Button>
+          <Button type="submit" form="form-rec" loading={sending}>Enviar link</Button>
         </>
       }
     >
       <form
         id="form-rec"
         noValidate
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           if (!EMAIL_RE.test(email.trim())) return setErr('Informe um e-mail válido.');
-          onSent(email.trim());
+          setSending(true);
+          setErr('');
+          try {
+            await onSent(email.trim());
+          } catch (error) {
+            setErr(error instanceof Error ? error.message : 'Não foi possível enviar o link. Tente novamente.');
+          } finally {
+            setSending(false);
+          }
         }}
       >
+        {err && <p role="alert" className="mb-3 text-sm text-[var(--color-danger)]">{err}</p>}
         <Field label="E-mail" htmlFor="rec-email" error={err}>
           <Input id="rec-email" type="email" value={email} invalid={!!err} onChange={(e) => { setEmail(e.target.value); setErr(''); }} autoFocus />
         </Field>
