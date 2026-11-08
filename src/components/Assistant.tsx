@@ -37,7 +37,7 @@ function useScreenContext() {
         scope: 'processo',
         label: `Processo ${numero.split('.')[0]}`,
         manual: `/processos/${encodeURIComponent(numero)}`,
-        suggestions: ['Resuma este caso.', 'Analisar caso', 'Gerar insight', 'Qual foi a última decisão?', 'Resuma este documento.'],
+        suggestions: ['Resuma este caso.', 'Analisar caso', 'Pontos para revisar', 'Qual foi a última decisão?', 'Resuma este documento.'],
       };
     }
     if (pathname.startsWith('/clientes'))
@@ -152,12 +152,12 @@ function AssistantWidget({
         <button
           onClick={() => setIsOpen(true)}
           className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 rounded-full border border-white/10 bg-[var(--color-brand-dark)] py-3 pl-3 pr-4 text-[13px] font-medium text-white shadow-lg shadow-[var(--color-navy)]/20 transition-colors hover:bg-[var(--color-navy-600)]"
-          aria-label="Abrir assistente jurídico contextual"
+          aria-label="Abrir assistente jurídico local"
         >
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-teal)]">
             <Sparkles size={14} />
           </span>
-          <span className="hidden sm:inline">Assistente</span>
+          <span className="hidden sm:inline">Assistente local</span>
         </button>
       )}
 
@@ -165,7 +165,7 @@ function AssistantWidget({
         <div className="absolute inset-0 bg-[var(--color-navy)]/20" onClick={() => setIsOpen(false)} />
         <aside
           role="dialog"
-          aria-label="Assistente jurídico contextual"
+          aria-label="Assistente jurídico local"
           className={cx(
             'absolute right-0 top-0 flex h-full w-full max-w-[400px] flex-col border-l border-line bg-canvas shadow-2xl transition-transform duration-300',
             isOpen ? 'translate-x-0' : 'translate-x-full',
@@ -177,13 +177,13 @@ function AssistantWidget({
               <Sparkles size={16} />
             </span>
             <div className="min-w-0 flex-1">
-              <h2 className="text-[14px] font-semibold leading-tight">Assistente jurídico contextual</h2>
+              <h2 className="text-[14px] font-semibold leading-tight">Assistente jurídico local</h2>
               <p className="truncate text-[11.5px] text-slate-400">
                 <span className="inline-flex items-center gap-1">
-                  <span className={cx('h-1.5 w-1.5 rounded-full', prefs.iaAtiva ? 'bg-[var(--color-success)]' : 'bg-slate-500')} /> {prefs.iaAtiva ? 'Pronta' : 'Desativada'}
+                  <span className={cx('h-1.5 w-1.5 rounded-full', prefs.iaAtiva ? 'bg-[var(--color-success)]' : 'bg-slate-500')} /> {prefs.iaAtiva ? 'Regras locais ativas' : 'Desativada'}
                 </span>
                 <span className="mx-1.5 text-slate-600">·</span>
-                Somente registros autorizados
+                Somente registros desta conta
               </p>
             </div>
             <button onClick={() => setIsOpen(false)} aria-label="Fechar assistente" className="rounded-md p-1.5 text-slate-400 hover:bg-white/10 hover:text-white">
@@ -262,7 +262,7 @@ function AssistantWidget({
               </button>
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-faint)]">
-              Gerado por IA a partir dos registros do JurisCore. Não constitui parecer jurídico.
+              Regras locais sobre registros desta conta. Não usa modelo generativo nem envia dados a serviço externo. Não constitui parecer jurídico.
             </p>
           </form>
         </aside>
@@ -270,4 +270,3 @@ function AssistantWidget({
     </>
   );
 }
-

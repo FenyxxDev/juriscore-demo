@@ -1,4 +1,4 @@
-import { type ReactNode, createContext, useContext, useMemo, useReducer } from 'react';
+import { type ReactNode, createContext, useCallback, useContext, useMemo, useReducer, useRef } from 'react';
 import type { StatusTone } from './components/ui';
 import {
   type Advogado,
@@ -15,6 +15,9 @@ import {
   diasAte,
   toneOf,
 } from './data';
+import { supabase } from './lib/supabase';
+import { loadWorkspace, type WorkspaceSnapshot } from './lib/workspace';
+import { saveUserSettings } from './lib/user-settings';
 
 const hoje = () =>
   new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -54,8 +57,6 @@ export type Notificacao = {
   lida: boolean;
 };
 
-export type Sessao = { id: string; dispositivo: string; local: string; inicio: string; atual?: boolean };
-
 export type Preferencias = {
   iaAtiva: boolean;
   agendaVisao: 'dia' | 'semana' | 'mes';
@@ -65,6 +66,25 @@ export type Preferencias = {
   antecedenciaPrazo: number;
   distribuicao: 'area' | 'carga' | 'manual';
   escritorio: { nome: string; cnpj: string; cidade: string; email: string };
+};
+
+const DEFAULT_NOTIF_PREFS: Record<NotifCategoria, boolean> = {
+  'prazos-proximos': true,
+  'prazos-atrasados': true,
+  audiencias: true,
+  processos: true,
+  documentos: true,
+  tarefas: true,
+};
+const DEFAULT_PREFS: Preferencias = {
+  iaAtiva: true,
+  agendaVisao: 'semana',
+  canalEmail: false,
+  canalApp: true,
+  resumoDiario: false,
+  antecedenciaPrazo: 3,
+  distribuicao: 'manual',
+  escritorio: { nome: '', cnpj: '', cidade: '', email: '' },
 };
 
 /** Ações sensíveis controladas por perfil. */
@@ -83,7 +103,7 @@ export type Permissao =
 
 export const PERMISSOES: { id: Permissao; label: string; perfis: Perfil[] }[] = [
   { id: 'gerenciarUsuarios', label: 'Gerenciar usuários e perfis', perfis: ['Administrador'] },
-  { id: 'verTodosProcessos', label: 'Visualizar todos os processos do escritório', perfis: ['Administrador'] },
+  { id: 'verTodosProcessos', label: 'Visualizar todos os processos desta conta', perfis: ['Administrador'] },
   { id: 'distribuirTarefas', label: 'Distribuir tarefas para a equipe', perfis: ['Administrador', 'Advogado'] },
   { id: 'cadastrarProcesso', label: 'Cadastrar processos', perfis: ['Administrador', 'Advogado', 'Assistente'] },
   { id: 'editarProcesso', label: 'Editar dados do processo', perfis: ['Administrador', 'Advogado'] },
@@ -105,24 +125,20 @@ type State = {
   lidas: string[];
   notifPrefs: Record<NotifCategoria, boolean>;
   prefs: Preferencias;
-  sessoes: Sessao[];
 };
 
 type Action =
   | { type: 'login'; userId: string; lembrar: boolean }
   | { type: 'logout' }
+  | { type: 'hydrateWorkspace'; ownerId: string; snapshot: WorkspaceSnapshot }
   | { type: 'register'; usuario: Advogado }
   | { type: 'updateUsuario'; id: string; patch: Partial<Omit<Advogado, 'id'>> }
-  | { type: 'endSessions' }
-  | { type: 'markRead'; id: string }
-  | { type: 'markAllRead'; ids: string[] }
-  | { type: 'setNotifPref'; categoria: NotifCategoria; on: boolean }
-  | { type: 'setPrefs'; patch: Partial<Preferencias> }
+  | { type: 'markAllRead'; ids: string[]; ownerId?: string }
+  | { type: 'setNotifPref'; categoria: NotifCategoria; on: boolean; ownerId?: string }
+  | { type: 'setPrefs'; patch: Partial<Preferencias>; ownerId?: string }
   | { type: 'addCompromisso'; compromisso: Omit<Compromisso, 'id' | 'status'> }
   | { type: 'setCompromissoStatus'; id: string; status: StatusTone }
   | { type: 'addCliente'; cliente: Omit<Cliente, 'id' | 'atualizacao' | 'status'> }
-  | { type: 'addAdvogado'; advogado: Omit<Advogado, 'id' | 'ativo' | 'senha' | 'ultimaAtividade'> & { ativo?: boolean } }
-  | { type: 'toggleUsuario'; id: string }
   | { type: 'addTarefa'; tarefa: Omit<Tarefa, 'id' | 'status'> & { status?: Tarefa['status'] } }
   | { type: 'toggleTarefa'; id: string }
   | {
@@ -151,13 +167,29 @@ const touch = (p: Processo): Processo => ({ ...p, atualizacao: hoje() });
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'login':
+      const changedAccount = state.session?.userId !== action.userId;
       return {
         ...state,
+        ...(changedAccount ? { clientes: [], processos: [], tarefas: [], compromissos: [], lidas: [], prefs: DEFAULT_PREFS, notifPrefs: DEFAULT_NOTIF_PREFS } : {}),
         session: { userId: action.userId, lembrar: action.lembrar },
-        advogados: state.advogados.map((a) => (a.id === action.userId ? { ...a, ultimaAtividade: agora() } : a)),
+        advogados: (changedAccount ? state.advogados.filter((a) => a.id === action.userId) : state.advogados)
+          .map((a) => (a.id === action.userId ? { ...a, ultimaAtividade: agora() } : a)),
       };
     case 'logout':
-      return { ...state, session: null };
+      return { ...state, session: null, clientes: [], advogados: [], processos: [], tarefas: [], compromissos: [], lidas: [], prefs: DEFAULT_PREFS, notifPrefs: DEFAULT_NOTIF_PREFS };
+    case 'hydrateWorkspace': {
+      if (state.session?.userId !== action.ownerId) return state;
+      const { settings, ...workspace } = action.snapshot;
+      return {
+        ...state,
+        ...workspace,
+        ...(settings ? {
+          prefs: { ...state.prefs, ...settings.prefs },
+          notifPrefs: { ...state.notifPrefs, ...settings.notifPrefs },
+          lidas: settings.readIds ?? state.lidas,
+        } : {}),
+      };
+    }
     case 'register':
       return {
         ...state,
@@ -167,22 +199,16 @@ function reducer(state: State, action: Action): State {
       };
     case 'updateUsuario':
       return { ...state, advogados: state.advogados.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)) };
-    case 'endSessions':
-      return { ...state, sessoes: state.sessoes.filter((x) => x.atual) };
-    case 'markRead':
-      return state.lidas.includes(action.id) ? state : { ...state, lidas: [...state.lidas, action.id] };
     case 'markAllRead':
-      return { ...state, lidas: [...new Set([...state.lidas, ...action.ids])] };
+      return action.ownerId && state.session?.userId !== action.ownerId ? state : { ...state, lidas: [...new Set([...state.lidas, ...action.ids])] };
     case 'setNotifPref':
-      return { ...state, notifPrefs: { ...state.notifPrefs, [action.categoria]: action.on } };
+      return action.ownerId && state.session?.userId !== action.ownerId ? state : { ...state, notifPrefs: { ...state.notifPrefs, [action.categoria]: action.on } };
     case 'setPrefs':
-      return { ...state, prefs: { ...state.prefs, ...action.patch } };
+      return action.ownerId && state.session?.userId !== action.ownerId ? state : { ...state, prefs: { ...state.prefs, ...action.patch } };
     case 'addCompromisso':
       return { ...state, compromissos: [{ ...action.compromisso, id: uid('cp'), status: 'confirmada' }, ...state.compromissos] };
     case 'setCompromissoStatus':
       return { ...state, compromissos: state.compromissos.map((c) => (c.id === action.id ? { ...c, status: action.status } : c)) };
-    case 'toggleUsuario':
-      return { ...state, advogados: state.advogados.map((a) => (a.id === action.id ? { ...a, ativo: !a.ativo } : a)) };
     case 'addTarefa':
       return {
         ...state,
@@ -201,14 +227,6 @@ function reducer(state: State, action: Action): State {
         clientes: [
           { ...action.cliente, id: uid('cli'), atualizacao: hoje(), status: 'ativo' },
           ...state.clientes,
-        ],
-      };
-    case 'addAdvogado':
-      return {
-        ...state,
-        advogados: [
-          ...state.advogados,
-          { ...action.advogado, ativo: action.advogado.ativo ?? true, id: uid('adv'), senha: 'juriscore', ultimaAtividade: 'Convite enviado' },
         ],
       };
     case 'addProcesso':
@@ -313,11 +331,14 @@ type StoreValue = State & {
   role: Perfil;
   user: Advogado & { name: string; role: Perfil };
   can: (p: Permissao) => boolean;
-  /** Todos os processos do escritório, sem recorte por perfil (uso administrativo). */
+  /** Todos os processos próprios da conta atual, com isolamento aplicado por RLS. */
   todosProcessos: Processo[];
   notificacoes: Notificacao[];
   naoLidas: number;
   dispatch: React.Dispatch<Action>;
+  refreshWorkspace: (expectedOwnerId?: string) => Promise<void>;
+  saveSettings: (prefs: Partial<Preferencias>, notifPrefs?: Partial<Record<NotifCategoria, boolean>>) => Promise<void>;
+  saveReadNotifications: (ids: string[]) => Promise<void>;
   stats: {
     ativos: number;
     prazosHoje: number;
@@ -358,10 +379,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     tarefas: [],
     compromissos: [],
     lidas: [],
-    notifPrefs: { 'prazos-proximos': true, 'prazos-atrasados': true, audiencias: true, processos: true, documentos: true, tarefas: true },
-    prefs: { iaAtiva: true, agendaVisao: 'semana', canalEmail: false, canalApp: true, resumoDiario: false, antecedenciaPrazo: 3, distribuicao: 'manual', escritorio: { nome: '', cnpj: '', cidade: '', email: '' } },
-    sessoes: [],
+    notifPrefs: DEFAULT_NOTIF_PREFS,
+    prefs: DEFAULT_PREFS,
   });
+
+  const refreshWorkspace = useCallback(async (expectedOwnerId?: string) => {
+    if (!supabase) throw new Error('O Supabase não está configurado.');
+    const { data, error } = await supabase.auth.getUser();
+    if (error) throw error;
+    const ownerId = data.user?.id;
+    if (!ownerId) throw new Error('Sessão expirada. Inicie sessão novamente.');
+    if (expectedOwnerId && ownerId !== expectedOwnerId) return;
+
+    const snapshot = await loadWorkspace();
+    const { data: current, error: currentError } = await supabase.auth.getUser();
+    if (currentError) throw currentError;
+    if (current.user?.id !== ownerId) return;
+    dispatch({ type: 'hydrateWorkspace', ownerId, snapshot });
+  }, [dispatch]);
+
+  const saveSettings = useCallback(async (
+    prefs: Partial<Preferencias>,
+    notifPrefs: Partial<Record<NotifCategoria, boolean>> = {},
+  ) => {
+    const ownerId = state.session?.userId;
+    if (!ownerId) throw new Error('Inicie sessão antes de alterar as preferências.');
+    await saveUserSettings({ prefs, notifPrefs }, ownerId);
+    if (Object.keys(prefs).length) dispatch({ type: 'setPrefs', ownerId, patch: prefs });
+    for (const [categoria, on] of Object.entries(notifPrefs) as [NotifCategoria, boolean][]) {
+      dispatch({ type: 'setNotifPref', ownerId, categoria, on });
+    }
+  }, [dispatch, state.session?.userId]);
+
+  const readQueue = useRef<Promise<void>>(Promise.resolve());
+  const readIdsRef = useRef<string[]>([]);
+  const readOwnerRef = useRef<string | null>(null);
+  const saveReadNotifications = useCallback((ids: string[]) => {
+    const ownerId = state.session?.userId;
+    if (!ownerId) return Promise.reject(new Error('Inicie sessão antes de atualizar as notificações.'));
+    if (readOwnerRef.current !== ownerId) {
+      readOwnerRef.current = ownerId;
+      readIdsRef.current = state.lidas;
+    }
+    const nextReadIds = [...new Set([...readIdsRef.current, ...ids])].slice(-500);
+    readIdsRef.current = nextReadIds;
+    const task = readQueue.current.catch(() => undefined).then(async () => {
+      await saveUserSettings({ prefs: {}, notifPrefs: {}, readIds: nextReadIds }, ownerId);
+      dispatch({ type: 'markAllRead', ownerId, ids: nextReadIds });
+    });
+    readQueue.current = task;
+    return task;
+  }, [dispatch, state.lidas, state.session?.userId]);
 
   const value = useMemo<StoreValue>(() => {
     const conta = state.advogados.find((a) => a.id === state.session?.userId) ?? {
@@ -380,18 +448,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const user = { ...conta, name: conta.nome, role };
     const can = (p: Permissao) => !!PERMISSOES.find((x) => x.id === p)?.perfis.includes(role);
 
-    // Recorte por perfil: mesma plataforma, acesso diferente.
-    const processos = state.processos.filter((p) =>
-      role === 'Administrador'
-        ? true
-        : role === 'Advogado'
-          ? p.responsavel === conta.nome
-          : p.responsavel === conta.equipe || conta.areas.includes(p.area),
-    );
-    const nums = new Set(processos.map((p) => p.numero));
-    const clienteIds = new Set(processos.map((p) => p.clienteId));
-    const clientes = role === 'Administrador' ? state.clientes : state.clientes.filter((c) => clienteIds.has(c.id) || !state.processos.some((p) => p.clienteId === c.id));
-    const tarefas = role === 'Administrador' ? state.tarefas : state.tarefas.filter((t) => nums.has(t.numero) || t.responsavel === conta.nome);
+    // A fronteira de visibilidade é a conta (RLS/owner_id), não o responsável
+    // nominal: nenhuma role pode consultar registros de outra conta.
+    const processos = state.processos;
+    const clientes = state.clientes;
+    const tarefas = state.tarefas;
 
     const ativos = processos.filter((p) => !p.arquivado && p.status !== 'encerrado');
     const pendentes = (pr: Prazo) => pr.status === 'pendente' || pr.status === 'atrasado' || pr.status === 'em-andamento';
@@ -460,6 +521,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       notificacoes,
       naoLidas: notificacoes.filter((n) => !n.lida).length,
       dispatch,
+      refreshWorkspace,
+      saveSettings,
+      saveReadNotifications,
       stats: {
         ativos: ativos.length,
         prazosHoje: allPrazos.filter((p) => p.tone === 'hoje').length,
@@ -482,7 +546,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       eventos,
       atividades,
     };
-  }, [state]);
+  }, [state, refreshWorkspace, saveSettings, saveReadNotifications]);
 
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;
 }

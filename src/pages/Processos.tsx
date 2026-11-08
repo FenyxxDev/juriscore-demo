@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Plus, SlidersHorizontal } from 'lucide-react';
 import {
@@ -12,7 +12,8 @@ import {
 } from '../components/ui';
 import { NovoProcessoModal } from '../components/NovoProcessoModal';
 import { AreaTag } from '../components/Areas';
-import { AREAS, diasAte } from '../data';
+import { AREAS, diasAte, type Processo } from '../data';
+import { listProcesses } from '../lib/processes';
 import { useStore } from '../store';
 
 const PER_PAGE = 6;
@@ -20,7 +21,11 @@ const uniq = (xs: string[]) => Array.from(new Set(xs));
 
 export function Processos() {
   const navigate = useNavigate();
-  const { processos: allProcessos, can } = useStore();
+  const { can } = useStore();
+  const [allProcessos, setAllProcessos] = useState<Processo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reload, setReload] = useState(0);
   const [novoOpen, setNovoOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('todos');
@@ -30,6 +35,17 @@ export function Processos() {
   const [tribunal, setTribunal] = useState('todos');
   const [periodo, setPeriodo] = useState('todos');
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError(false);
+    void listProcesses()
+      .then((items) => { if (active) setAllProcessos(items); })
+      .catch(() => { if (active) setLoadError(true); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [reload]);
 
   const filtered = useMemo(() => {
     return allProcessos.filter((p) => {
@@ -163,7 +179,14 @@ export function Processos() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => (
+              {loading ? (
+                <tr className="border-t border-line"><td colSpan={7} className="px-5 py-12 text-center text-muted">A carregar processos…</td></tr>
+              ) : loadError ? (
+                <tr className="border-t border-line"><td colSpan={7} className="px-5 py-12 text-center text-muted">
+                  Não foi possível carregar os processos desta conta.{' '}
+                  <button className="font-medium text-teal hover:underline" onClick={() => setReload((value) => value + 1)}>Tentar novamente</button>
+                </td></tr>
+              ) : rows.map((p) => (
                 <tr
                   key={p.numero}
                   onClick={() => navigate(`/processos/${encodeURIComponent(p.numero)}`)}
@@ -208,7 +231,7 @@ export function Processos() {
                   <td className="px-5 py-3.5 text-muted">{p.atualizacao}</td>
                 </tr>
               ))}
-              {rows.length === 0 && (
+              {!loading && !loadError && rows.length === 0 && (
                 <tr className="border-t border-line">
                   <td colSpan={7} className="px-5 py-12 text-center text-muted">
                     {allProcessos.length === 0

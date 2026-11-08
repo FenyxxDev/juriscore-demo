@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { CalendarClock, Plus } from 'lucide-react';
-import { Button, Card, EmptyState, Metric, PriorityPill, SearchInput, Segmented, Select, StatusBadge, cx } from '../components/ui';
+import { Button, Card, EmptyState, Metric, PriorityPill, SearchInput, Segmented, Select, StatusBadge, cx, useToast } from '../components/ui';
 import { AreaTag } from '../components/Areas';
 import { NovoEventoModal } from '../components/NovoEventoModal';
 import { AREAS, diasAte } from '../data';
 import { procLink, useStore } from '../store';
+import { completeProcessDeadline } from '../lib/processes';
 
 type Filtro = 'todos' | 'atrasado' | 'hoje' | 'futuro';
 const short = (n: string) => n.split('.')[0];
@@ -13,13 +14,15 @@ const toneRow = { atrasado: 'text-[var(--color-danger)]', hoje: 'text-[var(--col
 const toneLabel = { atrasado: 'Atrasado', hoje: 'Vence hoje', futuro: 'No prazo' } as const;
 
 export function Prazos() {
-  const { eventos, advogados, processos, dispatch, can } = useStore();
+  const { eventos, advogados, processos, refreshWorkspace, user, can } = useStore();
+  const toast = useToast();
   const [filtro, setFiltro] = useState<Filtro>('todos');
   const [resp, setResp] = useState('todos');
   const [q, setQ] = useState('');
   const [area, setArea] = useState('todos');
   const [periodo, setPeriodo] = useState('todos');
   const [novo, setNovo] = useState(false);
+  const [savingDeadline, setSavingDeadline] = useState<string | null>(null);
   const areaOf = useMemo(() => new Map(processos.map((p) => [p.numero, p.area])), [processos]);
 
   const prazos = useMemo(
@@ -52,6 +55,20 @@ export function Prazos() {
   };
   const areas = AREAS.filter((a) => prazos.some((p) => areaOf.get(p.numero) === a));
   const responsaveis = advogados.filter((a) => a.perfil === 'Advogado').map((a) => a.nome);
+
+  async function completeDeadline(id: string) {
+    if (savingDeadline) return;
+    setSavingDeadline(id);
+    try {
+      await completeProcessDeadline(id);
+      await refreshWorkspace(user.id);
+      toast({ tone: 'success', message: 'Prazo concluído.' });
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível concluir o prazo.' });
+    } finally {
+      setSavingDeadline(null);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-[1200px] px-6 py-7 md:px-8">
@@ -115,7 +132,7 @@ export function Prazos() {
       <Card>
         {rows.length === 0 ? (
           prazos.length === 0 ? (
-            <EmptyState icon={<CalendarClock size={22} />} title="Nenhum prazo pendente" description="Não há prazos em aberto nos processos do escritório." />
+            <EmptyState icon={<CalendarClock size={22} />} title="Nenhum prazo pendente" description="Não há prazos em aberto nos processos desta conta." />
           ) : (
             <EmptyState icon={<CalendarClock size={22} />} title="Nenhum prazo neste filtro" description="Ajuste a busca ou os filtros para ver resultados." action={<Button variant="secondary" onClick={reset}>Limpar filtros</Button>} />
           )
@@ -151,7 +168,8 @@ export function Prazos() {
                       <Button
                         size="sm"
                         variant="secondary"
-                        onClick={() => dispatch({ type: 'setPrazoStatus', numero: p.numero, prazoId: p.id, status: 'concluido' })}
+                        onClick={() => { void completeDeadline(p.id); }}
+                        loading={savingDeadline === p.id}
                       >
                         Concluir
                       </Button>

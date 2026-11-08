@@ -34,8 +34,11 @@ import { AIFailed, AIResultView, AIWorking } from '../components/AIResult';
 import { AreaTag } from '../components/Areas';
 import { NovoEventoModal } from '../components/NovoEventoModal';
 import { procLink, useStore } from '../store';
+import { addProcessMovement, completeProcessDeadline, createProcessDeadline, getProcessByNumber, setProcessStatus, updateProcess } from '../lib/processes';
+import { downloadDocument, listDocumentsForCase } from '../lib/documents';
+import { consultarDataJud, type DataJudResult } from '../lib/datajud';
 import { type AIResult, useAI } from '../ai';
-import { AREAS, diasAte } from '../data';
+import { AREAS, diasAte, type Prioridade } from '../data';
 
 const TABS = ['Resumo', 'Timeline', 'Partes', 'Documentos', 'Prazos', 'Audiências'];
 
@@ -52,17 +55,72 @@ const hl = (on: boolean) => (on ? 'ring-2 ring-[var(--color-teal)]/50 bg-[var(--
 export function ProcessoDetalhe() {
   const { numero } = useParams();
   const decoded = decodeURIComponent(numero ?? '');
-  const { processos, dispatch, can } = useStore();
+  const { can, refreshWorkspace, user } = useStore();
   const toast = useToast();
   const [sp, setSp] = useSearchParams();
   const tab = TABS.includes(sp.get('tab') ?? '') ? sp.get('tab')! : 'Resumo';
   const item = sp.get('item');
   const setTab = (t: string) => setSp({ tab: t }, { replace: true });
-  const [modal, setModal] = useState<null | 'editar' | 'mov' | 'prazo' | 'audiencia' | 'encerrar'>(null);
+  const [modal, setModal] = useState<null | 'editar' | 'mov' | 'prazo' | 'encerrar'>(null);
+  const [newHearingOpen, setNewHearingOpen] = useState(false);
+  const [proc, setProc] = useState<Proc | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [dataJudLoading, setDataJudLoading] = useState(false);
+  const [dataJud, setDataJud] = useState<{ result: DataJudResult; consultedAt: string } | null>(null);
   useHighlight(item);
 
-  const proc = processos.find((p) => p.numero === decoded);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError(false);
+    void Promise.all([getProcessByNumber(decoded), listDocumentsForCase(decoded)])
+      .then(([process, documents]) => {
+        if (active) setProc(process ? { ...process, documentos: documents } as Proc : null);
+      })
+      .catch(() => { if (active) setLoadError(true); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [decoded, reload]);
+
+  if (loading) return <div className="mx-auto max-w-[1400px] px-5 py-12 text-center text-sm text-muted">A carregar o processo…</div>;
+  if (loadError) return <div className="mx-auto max-w-[1400px] px-5 py-12"><Card className="p-8 text-center text-sm text-muted">Não foi possível carregar o processo desta conta. Verifique a ligação e tente novamente.<div className="mt-3"><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>Tentar novamente</Button></div></Card></div>;
   if (!proc) return <Navigate to="/processos" replace />;
+  const changeStatus = async (archived: boolean) => {
+    try {
+      await setProcessStatus(proc.numero, 'encerrado', archived, archived ? 'Processo encerrado e arquivado.' : 'Processo encerrado.');
+      setModal(null);
+      setReload((value) => value + 1);
+      void refreshWorkspace(user.id).catch(() => toast({ tone: 'error', message: 'Processo atualizado, mas o restante da conta não pôde ser recarregado.' }));
+      toast({ tone: 'success', message: archived ? 'Processo arquivado.' : 'Processo encerrado.' });
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível atualizar o processo.' });
+    }
+  };
+  const handleDocumentDownload = async (id: string, name: string) => {
+    try {
+      await downloadDocument(id);
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : `Não foi possível descarregar ${name}.` });
+    }
+  };
+  const handleDataJudConsult = async () => {
+    if (!proc.id) {
+      toast({ tone: 'error', message: 'Este processo não tem um identificador persistido para consulta segura.' });
+      return;
+    }
+    setDataJudLoading(true);
+    try {
+      const result = await consultarDataJud(proc.id);
+      setDataJud({ result, consultedAt: new Date().toLocaleString('pt-BR') });
+      toast({ tone: 'success', message: result.found ? 'Dados públicos recebidos do DataJud.' : 'O DataJud não encontrou correspondência pública.' });
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível consultar o DataJud.' });
+    } finally {
+      setDataJudLoading(false);
+    }
+  };
   const counts: Record<string, number> = {
     Timeline: proc.movimentacoes.length,
     Partes: proc.partes.length,
@@ -99,6 +157,9 @@ export function ProcessoDetalhe() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" icon={<FileSearch size={16} />} loading={dataJudLoading} onClick={() => void handleDataJudConsult()}>
+            Consultar DataJud
+          </Button>
           {can('editarProcesso') && (
             <Button variant="secondary" icon={<PencilLine size={16} />} onClick={() => setModal('editar')}>
               Editar
@@ -122,15 +183,47 @@ export function ProcessoDetalhe() {
         </div>
       </div>
 
+      <p className="mt-2 text-xs text-muted">A consulta é opcional. Ao solicitá-la, o número deste processo é enviado à API Pública DataJud do CNJ; a resposta não é guardada nem altera o seu registo.</p>
+
+      {dataJud && (
+        <Card className="mt-4 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">Dados públicos do DataJud</h2>
+              <p className="mt-1 text-xs text-muted">Consulta efetuada em {dataJud.consultedAt}. Estes dados não alteram o registo do processo.</p>
+            </div>
+            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-muted">Fonte: CNJ · DataJud</span>
+          </div>
+          {dataJud.result.found && dataJud.result.metadata ? (
+            <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div><dt className="text-xs text-muted">Classe processual</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.metadata.classe ?? 'Não informado'}</dd></div>
+              <div><dt className="text-xs text-muted">Data de ajuizamento</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.metadata.dataAjuizamento ?? 'Não informado'}</dd></div>
+              <div><dt className="text-xs text-muted">Grau</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.metadata.grau ?? 'Não informado'}</dd></div>
+            </dl>
+          ) : (
+            <p className="mt-4 text-sm text-muted">Não foi encontrada correspondência pública, ou não havia metadados permitidos para apresentar.</p>
+          )}
+        </Card>
+      )}
+
       <div className="mt-6">
         <Tabs tabs={TABS.map((t) => ({ id: t, label: t, count: counts[t] }))} active={tab} onChange={setTab} />
         <div className="mt-6">
           {tab === 'Resumo' && <ResumoTab proc={proc} onTab={setTab} />}
           {tab === 'Timeline' && <TimelineTab proc={proc} item={item} />}
           {tab === 'Partes' && <PartesTab proc={proc} />}
-          {tab === 'Documentos' && <DocumentosTab proc={proc} item={item} />}
-          {tab === 'Prazos' && <PrazosTab proc={proc} item={item} onAdd={() => setModal('prazo')} />}
-          {tab === 'Audiências' && <AudienciasTab proc={proc} item={item} onAdd={() => setModal('audiencia')} />}
+          {tab === 'Documentos' && <DocumentosTab proc={proc} item={item} onDownload={handleDocumentDownload} />}
+          {tab === 'Prazos' && <PrazosTab proc={proc} item={item} onAdd={() => setModal('prazo')} onComplete={async (deadlineId) => {
+            try {
+              await completeProcessDeadline(deadlineId);
+              setReload((value) => value + 1);
+              void refreshWorkspace(user.id).catch(() => toast({ tone: 'error', message: 'Prazo concluído, mas a Agenda não pôde ser atualizada.' }));
+              toast({ tone: 'success', message: 'Prazo concluído.' });
+            } catch (error) {
+              toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível concluir o prazo.' });
+            }
+          }} />}
+          {tab === 'Audiências' && <AudienciasTab proc={proc} item={item} onAdd={() => setNewHearingOpen(true)} />}
         </div>
       </div>
 
@@ -139,14 +232,24 @@ export function ProcessoDetalhe() {
         open={modal === 'mov'}
         onClose={() => setModal(null)}
         onSave={(mov) => {
-          dispatch({ type: 'addMovimentacao', numero: proc.numero, mov });
-          setModal(null);
-          toast({ tone: 'success', message: 'Movimentação registrada.' });
+          void addProcessMovement(proc.numero, mov)
+            .then(() => { setModal(null); setReload((value) => value + 1); void refreshWorkspace(user.id).catch(() => toast({ tone: 'error', message: 'Movimentação salva, mas a conta não pôde ser atualizada.' })); toast({ tone: 'success', message: 'Movimentação guardada.' }); })
+            .catch((error: unknown) => toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível guardar a movimentação.' }));
         }}
       />
-      <NovoEventoModal open={modal === 'prazo'} tipoInicial="prazo" numero={proc.numero} onClose={() => setModal(null)} />
-      <NovoEventoModal open={modal === 'audiencia'} tipoInicial="audiencia" numero={proc.numero} onClose={() => setModal(null)} />
-      {modal === 'editar' && <EditarProcesso proc={proc} onClose={() => setModal(null)} />}
+      <PrazoModal
+        open={modal === 'prazo'}
+        onClose={() => setModal(null)}
+        onSave={async (deadline) => {
+          await createProcessDeadline(proc.numero, deadline);
+          setModal(null);
+          setReload((value) => value + 1);
+          void refreshWorkspace(user.id).catch(() => toast({ tone: 'error', message: 'Prazo salvo, mas a Agenda não pôde ser atualizada.' }));
+          toast({ tone: 'success', message: 'Prazo guardado na sua conta.' });
+        }}
+      />
+      {modal === 'editar' && <EditarProcesso proc={proc} onClose={() => setModal(null)} onSaved={() => { setReload((value) => value + 1); void refreshWorkspace(user.id).catch(() => toast({ tone: 'error', message: 'Processo salvo, mas a conta não pôde ser atualizada.' })); }} />}
+      <NovoEventoModal open={newHearingOpen} numero={proc.numero} tipoInicial="audiencia" onClose={() => { setNewHearingOpen(false); setReload((value) => value + 1); }} />
 
       <Modal
         open={modal === 'encerrar'}
@@ -159,27 +262,13 @@ export function ProcessoDetalhe() {
             </Button>
             <Button
               variant="secondary"
-              onClick={() => {
-                dispatch({ type: 'updateStatus', numero: proc.numero, status: 'encerrado', nota: 'Processo encerrado.' });
-                setModal(null);
-                toast({ tone: 'success', message: 'Processo encerrado.' });
-              }}
+              onClick={() => void changeStatus(false)}
             >
               Encerrar
             </Button>
             <Button
               icon={<Archive size={16} />}
-              onClick={() => {
-                dispatch({
-                  type: 'updateStatus',
-                  numero: proc.numero,
-                  status: 'encerrado',
-                  arquivado: true,
-                  nota: 'Processo encerrado e arquivado.',
-                });
-                setModal(null);
-                toast({ tone: 'success', message: 'Processo arquivado.' });
-              }}
+              onClick={() => void changeStatus(true)}
             >
               Arquivar
             </Button>
@@ -195,11 +284,24 @@ export function ProcessoDetalhe() {
   );
 }
 
-function EditarProcesso({ proc, onClose }: { proc: Proc; onClose: () => void }) {
-  const { advogados, dispatch } = useStore();
+function EditarProcesso({ proc, onClose, onSaved }: { proc: Proc; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
+  const [saving, setSaving] = useState(false);
   const [f, setF] = useState({ responsavel: proc.responsavel, area: proc.area, tribunal: proc.tribunal, comarca: proc.comarca, vara: proc.vara, resumo: proc.resumo, observacoes: proc.observacoes ?? '' });
   const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }));
+  const save = async () => {
+    setSaving(true);
+    try {
+      await updateProcess(proc.numero, f);
+      onSaved();
+      onClose();
+      toast({ tone: 'success', message: 'Alterações guardadas.' });
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível guardar as alterações.' });
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <Modal
       open
@@ -208,16 +310,14 @@ function EditarProcesso({ proc, onClose }: { proc: Proc; onClose: () => void }) 
       title="Editar processo"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => { dispatch({ type: 'updateProcesso', numero: proc.numero, patch: f }); onClose(); toast({ tone: 'success', message: 'Alterações salvas.' }); }}>Salvar</Button>
+          <Button variant="secondary" disabled={saving} onClick={onClose}>Cancelar</Button>
+          <Button loading={saving} onClick={() => void save()}>Salvar</Button>
         </>
       }
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Responsável" htmlFor="ep-r">
-          <Select id="ep-r" value={f.responsavel} onChange={(e) => set('responsavel', e.target.value)}>
-            {advogados.filter((a) => a.ativo && a.perfil !== 'Assistente').map((a) => <option key={a.id}>{a.nome}</option>)}
-          </Select>
+          <Input id="ep-r" value={f.responsavel} onChange={(e) => set('responsavel', e.target.value)} />
         </Field>
         <Field label="Área jurídica" htmlFor="ep-a">
           <Select id="ep-a" value={f.area} onChange={(e) => set('area', e.target.value)}>{AREAS.map((a) => <option key={a}>{a}</option>)}</Select>
@@ -394,16 +494,16 @@ function ResumoTab({ proc, onTab }: { proc: Proc; onTab: (t: string) => void }) 
       {/* Insights + ponte para o Assistente */}
       <div className="flex flex-col gap-6 self-start">
         <OnDemandCard
-          title="Insights do Assistente"
+          title="Pontos de atenção"
           icon={<Lightbulb size={15} />}
           hint="O que os registros podem significar para o caso"
-          idle="Interpretações, pontos de atenção e possíveis providências, com fontes. Gerado apenas quando solicitado."
-          label="Gerar insight"
-          working="Interpretando os registros…"
+          idle="Interpretações e possíveis providências com fontes. Análise local gerada apenas quando solicitada."
+          label="Ver pontos de atenção"
+          working="Analisando os registros locais…"
           run={insight}
           iaAtiva={prefs.iaAtiva}
           manual={manual}
-          onRun={() => insight.go(() => ai.answer({ scope: 'processo', numero: proc.numero }, 'Gerar insight'))}
+          onRun={() => insight.go(() => ai.answer({ scope: 'processo', numero: proc.numero }, 'Pontos para revisar'))}
         />
         <OnDemandCard
           title="Análise do caso"
@@ -511,9 +611,8 @@ function PartesTab({ proc }: { proc: Proc }) {
 
 /* ------------------------------------------------------------ Documentos */
 
-function DocumentosTab({ proc, item }: { proc: Proc; item: string | null }) {
+function DocumentosTab({ proc, item, onDownload }: { proc: Proc; item: string | null; onDownload: (id: string, name: string) => Promise<void> }) {
   const ai = useAI();
-  const toast = useToast();
   const { prefs } = useStore();
   const [aberto, setAberto] = useState<string | null>(null);
   const run = useAIRun();
@@ -560,7 +659,7 @@ function DocumentosTab({ proc, item }: { proc: Proc; item: string | null }) {
                     </button>
                     <button
                       aria-label={`Baixar ${d.nome}`}
-                      onClick={() => toast({ tone: 'info', message: `Download de ${d.nome} iniciado.` })}
+                      onClick={() => void onDownload(d.id, d.nome)}
                       className="rounded-md p-1.5 text-muted hover:bg-slate-100 hover:text-teal"
                     >
                       <Download size={16} />
@@ -587,8 +686,8 @@ function DocumentosTab({ proc, item }: { proc: Proc; item: string | null }) {
 
 /* ---------------------------------------------------------------- Prazos */
 
-function PrazosTab({ proc, item, onAdd }: { proc: Proc; item: string | null; onAdd: () => void }) {
-  const { dispatch, can } = useStore();
+function PrazosTab({ proc, item, onAdd, onComplete }: { proc: Proc; item: string | null; onAdd: () => void; onComplete: (id: string) => Promise<void> }) {
+  const { can } = useStore();
   const urgentes = proc.prazos.filter((p) => p.prioridade === 'alta' && (p.status === 'pendente' || p.status === 'atrasado'));
   return (
     <div className="flex flex-col gap-4">
@@ -635,7 +734,7 @@ function PrazosTab({ proc, item, onAdd }: { proc: Proc; item: string | null; onA
                     <td className="px-5 py-3.5 text-right">
                       {p.status !== 'concluido' && can('gerenciarPrazos') && (
                         <button
-                          onClick={() => dispatch({ type: 'setPrazoStatus', numero: proc.numero, prazoId: p.id, status: 'concluido' })}
+                          onClick={() => { void onComplete(p.id); }}
                           className="inline-flex items-center gap-1 text-[13px] font-medium text-teal hover:underline"
                         >
                           <CheckCircle2 size={14} /> Concluir
@@ -700,6 +799,86 @@ function ActionForm({ id, onSubmit, children }: { id: string; onSubmit: (e: Form
     <form id={id} onSubmit={onSubmit} className="flex flex-col gap-4">
       {children}
     </form>
+  );
+}
+
+const localDateInputValue = () => {
+  const date = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
+function PrazoModal({
+  open,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSave: (deadline: { descricao: string; data: string; responsavel: string; prioridade: Prioridade }) => Promise<void>;
+}) {
+  const [descricao, setDescricao] = useState('');
+  const [data, setData] = useState(localDateInputValue());
+  const [responsavel, setResponsavel] = useState('');
+  const [prioridade, setPrioridade] = useState<Prioridade>('média');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!descricao.trim() || !data) {
+      setError('Informe a descrição e a data do prazo.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave({ descricao: descricao.trim(), data, responsavel: responsavel.trim(), prioridade });
+      setDescricao('');
+      setData(localDateInputValue());
+      setResponsavel('');
+      setPrioridade('média');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Não foi possível guardar o prazo.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => { if (!saving) onClose(); }}
+      title="Cadastrar prazo"
+      footer={
+        <>
+          <Button variant="secondary" disabled={saving} onClick={onClose}>Cancelar</Button>
+          <Button type="submit" form="form-prazo" loading={saving}>Guardar prazo</Button>
+        </>
+      }
+    >
+      <ActionForm id="form-prazo" onSubmit={(event) => { void submit(event); }}>
+        <Field label="Descrição do prazo" htmlFor="pd-description" required>
+          <Input id="pd-description" value={descricao} onChange={(event) => setDescricao(event.target.value)} maxLength={300} required />
+        </Field>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Data limite" htmlFor="pd-date" required>
+            <Input id="pd-date" type="date" value={data} onChange={(event) => setData(event.target.value)} required />
+          </Field>
+          <Field label="Prioridade" htmlFor="pd-priority">
+            <Select id="pd-priority" className="h-10 w-full" value={prioridade} onChange={(event) => setPrioridade(event.target.value as Prioridade)}>
+              <option value="alta">Alta</option>
+              <option value="média">Média</option>
+              <option value="baixa">Baixa</option>
+            </Select>
+          </Field>
+        </div>
+        <Field label="Responsável" htmlFor="pd-responsible">
+          <Input id="pd-responsible" value={responsavel} onChange={(event) => setResponsavel(event.target.value)} />
+        </Field>
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      </ActionForm>
+    </Modal>
   );
 }
 

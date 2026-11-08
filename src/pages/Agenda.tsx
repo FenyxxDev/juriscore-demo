@@ -1,13 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Gavel, ListChecks, Plus, Sparkles, X } from 'lucide-react';
-import { Button, Card, Segmented, Select, StatusBadge, cx } from '../components/ui';
+import { Button, Card, Segmented, Select, StatusBadge, cx, useToast } from '../components/ui';
 import { AreaTag } from '../components/Areas';
 import { type EventoTipo, NovoEventoModal } from '../components/NovoEventoModal';
 import { AIFailed, AIResultView, AIWorking } from '../components/AIResult';
 import { type AIResult, useAI } from '../ai';
 import { procLink, useStore } from '../store';
 import { diasAte, hojeZero, parseData } from '../data';
+import { completeProcessDeadline } from '../lib/processes';
+import { setCalendarAppointmentStatus, setProcessHearingStatus } from '../lib/schedule';
 
 type Kind = 'prazo' | 'audiencia' | 'tarefa' | 'compromisso';
 type Item = {
@@ -46,14 +48,19 @@ const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julh
 const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
 export function Agenda() {
-  const { processos, tarefas, compromissos, advogados, prefs, can, dispatch, user } = useStore();
+  const { processos, tarefas, compromissos, advogados, prefs, can, user, refreshWorkspace } = useStore();
   const isAdmin = user.perfil === 'Administrador';
+  const toast = useToast();
   const ai = useAI();
   const [visao, setVisao] = useState<'dia' | 'semana' | 'mes'>(prefs.agendaVisao);
   const [cursor, setCursor] = useState(hojeZero);
   const [f, setF] = useState({ resp: 'todos', tipo: 'todos', area: 'todas', periodo: 'visao', status: 'todos' });
   const [novo, setNovo] = useState<{ data?: string; tipo?: EventoTipo } | null>(null);
+  const [savingDeadline, setSavingDeadline] = useState<string | null>(null);
+  const [savingEvent, setSavingEvent] = useState<string | null>(null);
   const [hoje, setHoje] = useState<{ s: 'working' | 'done' | 'error'; r?: AIResult } | null>(null);
+
+  useEffect(() => setVisao(prefs.agendaVisao), [prefs.agendaVisao]);
 
   const itens = useMemo<Item[]>(() => {
     const out: Item[] = [];
@@ -65,10 +72,10 @@ export function Agenda() {
         const st = x.status === 'concluido' ? 'concluido' : diasAte(x.data) < 0 ? 'atrasado' : 'pendente';
         out.push({ key: `pz-${x.id}`, id: x.id, kind: 'prazo', titulo: x.descricao, d, numero: p.numero, cliente: p.cliente, area: p.area, responsavel: x.responsavel, status: st, to: procLink(p.numero, 'Prazos', x.id) });
       });
-      p.audiencias.forEach((a) => {
+      p.audiencias.filter((a) => a.status !== 'cancelada').forEach((a) => {
         const d = parseData(a.data);
         if (!d) return;
-        out.push({ key: `au-${a.id}`, id: a.id, kind: 'audiencia', titulo: a.tipo, d, hora: horaDe(a.data), numero: p.numero, cliente: p.cliente, area: p.area, responsavel: a.responsavel ?? p.responsavel, status: a.status === 'realizada' || diasAte(a.data) < 0 ? 'concluido' : 'agendado', detalhe: `${a.modalidade} · ${a.local}`, to: procLink(p.numero, 'Audiências', a.id) });
+        out.push({ key: `au-${a.id}`, id: a.id, kind: 'audiencia', titulo: a.tipo, d, hora: horaDe(a.data), numero: p.numero, cliente: p.cliente, area: p.area, responsavel: a.responsavel ?? p.responsavel, status: a.status === 'realizada' ? 'concluido' : diasAte(a.data) < 0 ? 'atrasado' : 'agendado', detalhe: `${a.modalidade} · ${a.local}`, to: procLink(p.numero, 'Audiências', a.id) });
       });
     });
     tarefas.forEach((t) => {
@@ -80,15 +87,11 @@ export function Agenda() {
       const d = parseData(c.data);
       if (!d) return;
       const p = processos.find((x) => x.numero === c.numero);
-      out.push({ key: `cp-${c.id}`, id: c.id, kind: 'compromisso', titulo: c.titulo, d, hora: horaDe(c.data), numero: c.numero, cliente: p?.cliente, area: p?.area, responsavel: c.responsavel, status: c.status === 'concluido' ? 'concluido' : 'agendado', detalhe: c.local, to: c.numero ? procLink(c.numero) : undefined });
+      out.push({ key: `cp-${c.id}`, id: c.id, kind: 'compromisso', titulo: c.titulo, d, hora: horaDe(c.data), numero: c.numero, cliente: p?.cliente, area: p?.area, responsavel: c.responsavel, status: c.status === 'concluido' ? 'concluido' : diasAte(c.data) < 0 ? 'atrasado' : 'agendado', detalhe: c.local, to: c.numero ? procLink(c.numero) : undefined });
     });
-    // Recorte por perfil: advogado vê a própria agenda; assistente, somente o autorizado.
-    const nums = new Set(processos.map((p) => p.numero));
-    const visiveis = out.filter((i) =>
-      isAdmin ? true : user.perfil === 'Advogado' ? i.responsavel === user.nome : i.responsavel === user.nome || (!!i.numero && nums.has(i.numero)),
-    );
-    return visiveis.sort((a, b) => a.d.getTime() - b.d.getTime() || minutos(a.hora) - minutos(b.hora));
-  }, [processos, tarefas, compromissos, isAdmin, user.perfil, user.nome]);
+    // O escopo é a conta autenticada; responsável é apenas um filtro visual.
+    return out.sort((a, b) => a.d.getTime() - b.d.getTime() || minutos(a.hora) - minutos(b.hora));
+  }, [processos, tarefas, compromissos]);
 
   // Intervalo da visão atual
   const range = useMemo(() => {
@@ -116,6 +119,52 @@ export function Agenda() {
   const move = (dir: number) =>
     setCursor((c) => (visao === 'dia' ? addDays(c, dir) : visao === 'semana' ? addDays(c, dir * 7) : new Date(c.getFullYear(), c.getMonth() + dir, 1)));
 
+  async function completeDeadline(id: string) {
+    if (savingDeadline) return;
+    setSavingDeadline(id);
+    try {
+      await completeProcessDeadline(id);
+      await refreshWorkspace(user.id);
+      toast({ tone: 'success', message: 'Prazo concluído.' });
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível concluir o prazo.' });
+    } finally {
+      setSavingDeadline(null);
+    }
+  }
+
+  async function changeScheduledStatus(item: Item, nextStatus: 'realizada' | 'concluido' | 'cancelada') {
+    if (savingEvent) return;
+    setSavingEvent(item.id);
+    try {
+      if (item.kind === 'audiencia') {
+        if (nextStatus === 'concluido') throw new Error('Status inválido para audiência.');
+        await setProcessHearingStatus(item.id, nextStatus);
+      } else if (item.kind === 'compromisso') {
+        if (nextStatus === 'realizada') throw new Error('Status inválido para compromisso.');
+        await setCalendarAppointmentStatus(item.id, nextStatus);
+      }
+      await refreshWorkspace(user.id);
+      toast({ tone: 'success', message: nextStatus === 'cancelada' ? 'Evento cancelado.' : item.kind === 'audiencia' ? 'Audiência marcada como realizada.' : 'Compromisso concluído.' });
+    } catch (error) {
+      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível atualizar o evento.' });
+    } finally {
+      setSavingEvent(null);
+    }
+  }
+
+  function completeItem(item: Item) {
+    if (item.kind === 'prazo') void completeDeadline(item.id);
+    else if (item.kind === 'audiencia') void changeScheduledStatus(item, 'realizada');
+    else if (item.kind === 'compromisso') void changeScheduledStatus(item, 'concluido');
+  }
+
+  function cancelItem(item: Item) {
+    if (item.kind !== 'audiencia' && item.kind !== 'compromisso') return;
+    if (!window.confirm(`Cancelar ${item.kind === 'audiencia' ? 'esta audiência' : 'este compromisso'}?`)) return;
+    void changeScheduledStatus(item, 'cancelada');
+  }
+
   const titulo =
     visao === 'dia'
       ? `${cursor.getDate()} de ${MESES[cursor.getMonth()]} de ${cursor.getFullYear()}`
@@ -139,7 +188,7 @@ export function Agenda() {
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="eyebrow">Agenda</p>
-          <h1 className="mt-1 text-[27px] font-semibold tracking-tight text-ink">{isAdmin ? 'Agenda da equipe' : 'Minha agenda'}</h1>
+          <h1 className="mt-1 text-[27px] font-semibold tracking-tight text-ink">{isAdmin ? 'Agenda' : 'Minha agenda'}</h1>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" icon={<Sparkles size={15} />} disabled={!prefs.iaAtiva} onClick={perguntarHoje}>O que preciso fazer hoje?</Button>
@@ -157,7 +206,7 @@ export function Agenda() {
         {isAdmin && (
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             {[
-              { k: 'resp' as const, label: 'Responsável', opts: [['todos', 'Toda a equipe'], ...advogados.filter((a) => a.ativo).map((a) => [a.nome, a.nome])] },
+              { k: 'resp' as const, label: 'Responsável', opts: [['todos', 'Todos os responsáveis'], ...advogados.filter((a) => a.ativo).map((a) => [a.nome, a.nome])] },
               { k: 'tipo' as const, label: 'Tipo', opts: [['todos', 'Todos os tipos'], ...(Object.keys(KINDS) as Kind[]).map((k) => [k, KINDS[k].label])] },
               { k: 'periodo' as const, label: 'Período', opts: [['visao', 'Período exibido'], ['7', 'Próximos 7 dias'], ['30', 'Próximos 30 dias'], ['atrasados', 'Atrasados']] },
             ].map(({ k, label, opts }) => (
@@ -230,7 +279,7 @@ export function Agenda() {
                   {on(cursor).map((i) => (
                     <li key={i.key} className="flex gap-4 px-5 py-3.5">
                       <span className="tnum w-14 shrink-0 pt-0.5 text-[13px] font-medium text-muted">{i.hora ?? 'Dia todo'}</span>
-                      <ItemBody i={i} onDone={() => i.numero && dispatch({ type: 'setPrazoStatus', numero: i.numero, prazoId: i.id, status: 'concluido' })} />
+                      <ItemBody i={i} onDone={() => completeItem(i)} onCancel={() => cancelItem(i)} busy={savingDeadline !== null || savingEvent !== null} />
                     </li>
                   ))}
                 </ul>
@@ -254,7 +303,7 @@ export function Agenda() {
                   <p className="tnum mb-1 text-[11.5px] font-medium text-muted">
                     {String(i.d.getDate()).padStart(2, '0')}/{String(i.d.getMonth() + 1).padStart(2, '0')}{i.hora ? ` · ${i.hora}` : ''}
                   </p>
-                  <ItemBody i={i} compact onDone={() => i.numero && dispatch({ type: 'setPrazoStatus', numero: i.numero, prazoId: i.id, status: 'concluido' })} />
+                  <ItemBody i={i} compact onDone={() => completeItem(i)} onCancel={() => cancelItem(i)} busy={savingDeadline !== null || savingEvent !== null} />
                 </li>
               ))}
             </ul>
@@ -314,7 +363,7 @@ function Chip({ i }: { i: Item }) {
   return i.to ? <Link to={i.to} className={cls}>{body}</Link> : <div className={cls}>{body}</div>;
 }
 
-function ItemBody({ i, compact, onDone }: { i: Item; compact?: boolean; onDone: () => void }) {
+function ItemBody({ i, compact, onDone, onCancel, busy }: { i: Item; compact?: boolean; onDone: () => void; onCancel: () => void; busy: boolean }) {
   const K = KINDS[i.kind];
   const statusTone = i.status === 'agendado' ? 'confirmada' : i.status;
   return (
@@ -341,10 +390,17 @@ function ItemBody({ i, compact, onDone }: { i: Item; compact?: boolean; onDone: 
             {i.detalhe && <span className="truncate">{i.detalhe}</span>}
           </p>
         )}
-        {i.kind === 'prazo' && i.status !== 'concluido' && !compact && (
-          <button onClick={onDone} className="mt-1.5 inline-flex items-center gap-1 text-[12.5px] font-medium text-[var(--color-teal)] hover:underline">
-            <CheckCircle2 size={13} /> Concluir prazo
-          </button>
+        {!compact && (i.kind === 'prazo' && i.status !== 'concluido' || (i.kind === 'audiencia' || i.kind === 'compromisso') && i.status !== 'concluido') && (
+          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+            {(i.kind === 'prazo' || i.kind === 'audiencia' || i.kind === 'compromisso') && (
+              <button disabled={busy} onClick={onDone} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-[var(--color-teal)] hover:underline disabled:opacity-50">
+                <CheckCircle2 size={13} /> {i.kind === 'prazo' ? 'Concluir prazo' : i.kind === 'audiencia' ? 'Marcar realizada' : 'Concluir compromisso'}
+              </button>
+            )}
+            {(i.kind === 'audiencia' || i.kind === 'compromisso') && (
+              <button disabled={busy} onClick={onCancel} className="text-[12.5px] font-medium text-danger hover:underline disabled:opacity-50">Cancelar</button>
+            )}
+          </div>
         )}
       </div>
     </div>

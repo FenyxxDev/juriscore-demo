@@ -10,11 +10,11 @@
     "format": "oxfmt"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "lucide-react": "^1.47.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router": "^8.4.0",
-    "@supabase/supabase-js": "^2.57.4"
+    "react-router": "^8.4.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

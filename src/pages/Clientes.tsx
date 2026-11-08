@@ -38,7 +38,7 @@ const toCliente = (row: ClientRow): Cliente => ({
 });
 
 export function Clientes() {
-  const { processos, can } = useStore();
+  const { processos, can, refreshWorkspace, user } = useStore();
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [loadingClients, setLoadingClients] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -267,6 +267,7 @@ export function Clientes() {
 
           const next = toCliente(data as ClientRow);
           setClientes((current) => [next, ...current]);
+          void refreshWorkspace(user.id).catch(() => toast({ tone: 'error', message: 'Cliente salvo, mas os dados da conta não puderam ser atualizados. Atualize a página.' }));
           setModalOpen(false);
           toast({ tone: 'success', message: `Cliente "${cliente.nome}" cadastrado.` });
           return true;
