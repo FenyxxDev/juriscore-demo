@@ -39,7 +39,7 @@ export function buildSearchPayload(caseNumber) {
   return {
     size: 1,
     track_total_hits: false,
-    _source: ['nivelSigilo', 'classe.nome', 'dataAjuizamento', 'grau'],
+    _source: ['numeroProcesso', 'nivelSigilo', 'classe.nome', 'dataAjuizamento', 'grau'],
     query: { match: { numeroProcesso: caseNumber } },
   };
 }
@@ -58,9 +58,10 @@ function safeDate(value) {
   return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== match[1] ? null : match[1];
 }
 
-export function sanitizeDataJudHit(hit) {
+export function sanitizeDataJudHit(hit, expectedCaseNumber) {
   const source = hit && typeof hit === 'object' ? hit._source : null;
   if (!source || typeof source !== 'object' || Number(source.nivelSigilo) !== 0) return null;
+  if (normalizeCaseNumber(source.numeroProcesso) !== expectedCaseNumber) return null;
 
   const metadata = {
     classe: safeLabel(source.classe?.nome),
@@ -71,9 +72,9 @@ export function sanitizeDataJudHit(hit) {
   return metadata;
 }
 
-export function sanitizeDataJudResponse(payload) {
+export function sanitizeDataJudResponse(payload, expectedCaseNumber) {
   const hits = payload?.hits?.hits;
   if (!Array.isArray(hits)) throw new Error('Resposta inválida da fonte DataJud.');
-  const metadata = sanitizeDataJudHit(hits[0]);
+  const metadata = sanitizeDataJudHit(hits[0], expectedCaseNumber);
   return { found: metadata !== null, metadata };
 }
