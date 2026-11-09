@@ -87,7 +87,7 @@ export async function queryDataJud({ tribunal, caseNumber, apiKey, fetchImpl = f
   }
 
   try {
-    return sanitizeDataJudResponse(payload);
+    return sanitizeDataJudResponse(payload, caseNumber);
   } catch {
     throw new DataJudServiceError('invalid_upstream_response', 502, 'Resposta inválida da fonte DataJud.');
   }

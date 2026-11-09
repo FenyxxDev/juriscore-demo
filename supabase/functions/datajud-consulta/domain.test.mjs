@@ -27,32 +27,45 @@ test('gera pesquisa exata limitada a um resultado e poucos campos', () => {
   assert.deepEqual(buildSearchPayload('00012345620248170001'), {
     size: 1,
     track_total_hits: false,
-    _source: ['nivelSigilo', 'classe.nome', 'dataAjuizamento', 'grau'],
+    _source: ['numeroProcesso', 'nivelSigilo', 'classe.nome', 'dataAjuizamento', 'grau'],
     query: { match: { numeroProcesso: '00012345620248170001' } },
   });
 });
 
 test('minimiza a resposta e descarta partes, movimentos e processos sigilosos', () => {
+  const expectedCaseNumber = '00012345620248170001';
   const publicResult = sanitizeDataJudResponse({
     hits: { hits: [{ _source: {
       nivelSigilo: 0,
       classe: { nome: 'Procedimento comum', codigo: 'ignored' },
       dataAjuizamento: '2024-03-22T10:20:30.000Z',
       grau: 'G1',
-      numeroProcesso: 'must-not-return',
+      numeroProcesso: expectedCaseNumber,
       partes: [{ nome: 'Pessoa identificável' }],
       movimentos: [{ nome: 'conteúdo omitido' }],
     } }] },
-  });
+  }, expectedCaseNumber);
   assert.deepEqual(publicResult, {
     found: true,
     metadata: { classe: 'Procedimento comum', dataAjuizamento: '2024-03-22', grau: 'G1' },
   });
   assert.equal(JSON.stringify(publicResult).includes('Pessoa identificável'), false);
-  assert.deepEqual(sanitizeDataJudResponse({ hits: { hits: [{ _source: { nivelSigilo: 1, classe: { nome: 'Restrito' } } }] } }), {
+  assert.equal(JSON.stringify(publicResult).includes(expectedCaseNumber), false);
+  assert.deepEqual(sanitizeDataJudResponse({ hits: { hits: [{ _source: { nivelSigilo: 1, classe: { nome: 'Restrito' } } }] } }, expectedCaseNumber), {
     found: false,
     metadata: null,
   });
+});
+
+test('descarta metadados quando o número CNJ devolvido não corresponde ao solicitado', () => {
+  const result = sanitizeDataJudResponse({
+    hits: { hits: [{ _source: {
+      numeroProcesso: '0001234-56.2024.8.17.0002',
+      nivelSigilo: 0,
+      classe: { nome: 'Processo diferente' },
+    } }] },
+  }, '00012345620248170001');
+  assert.deepEqual(result, { found: false, metadata: null });
 });
 
 test('envia chave só no cabeçalho e não envia campos do utilizador como DSL', async () => {
