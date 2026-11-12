@@ -36,7 +36,7 @@ import { NovoEventoModal } from '../components/NovoEventoModal';
 import { procLink, useStore } from '../store';
 import { addProcessMovement, completeProcessDeadline, createProcessDeadline, getProcessByNumber, setProcessStatus, updateProcess } from '../lib/processes';
 import { downloadDocument, listDocumentsForCase } from '../lib/documents';
-import { consultarDataJud, type DataJudResult } from '../lib/datajud';
+import { consultarDataJud, DataJudError, type DataJudResult } from '../lib/datajud';
 import { type AIResult, useAI } from '../ai';
 import { AREAS, diasAte, type Prioridade } from '../data';
 
@@ -69,6 +69,7 @@ export function ProcessoDetalhe() {
   const [reload, setReload] = useState(0);
   const [dataJudLoading, setDataJudLoading] = useState(false);
   const [dataJud, setDataJud] = useState<{ result: DataJudResult; consultedAt: string } | null>(null);
+  const [dataJudError, setDataJudError] = useState<string | null>(null);
   useHighlight(item);
 
   useEffect(() => {
@@ -111,12 +112,16 @@ export function ProcessoDetalhe() {
       return;
     }
     setDataJudLoading(true);
+    setDataJud(null);
+    setDataJudError(null);
     try {
       const result = await consultarDataJud(proc.id);
       setDataJud({ result, consultedAt: new Date().toLocaleString('pt-BR') });
       toast({ tone: 'success', message: result.found ? 'Dados públicos recebidos do DataJud.' : 'O DataJud não encontrou correspondência pública.' });
     } catch (error) {
-      toast({ tone: 'error', message: error instanceof Error ? error.message : 'Não foi possível consultar o DataJud.' });
+      const message = error instanceof DataJudError ? error.message : 'Não foi possível consultar o DataJud.';
+      setDataJudError(message);
+      toast({ tone: 'error', message });
     } finally {
       setDataJudLoading(false);
     }
@@ -157,7 +162,7 @@ export function ProcessoDetalhe() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" icon={<FileSearch size={16} />} loading={dataJudLoading} onClick={() => void handleDataJudConsult()}>
+          <Button variant="secondary" disabled={!user} icon={<FileSearch size={16} />} loading={dataJudLoading} onClick={() => void handleDataJudConsult()}>
             Consultar DataJud
           </Button>
           {can('editarProcesso') && (
@@ -184,6 +189,8 @@ export function ProcessoDetalhe() {
       </div>
 
       <p className="mt-2 text-xs text-muted">A consulta é opcional. Ao solicitá-la, o número deste processo é enviado à API Pública DataJud do CNJ; a resposta não é guardada nem altera o seu registo.</p>
+
+      {dataJudError && <Card className="mt-4 border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/5 p-4 text-sm text-danger">{dataJudError}</Card>}
 
       {dataJud && (
         <Card className="mt-4 p-5">
