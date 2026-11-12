@@ -88,3 +88,27 @@ test('envia chave só no cabeçalho e não envia campos do utilizador como DSL',
   assert.equal(JSON.parse(captured.options.body).query.match.numeroProcesso, '00012345620248170001');
   assert.deepEqual(result, { found: false, metadata: null });
 });
+
+test('converte timeout externo em erro seguro e classificado', async () => {
+  await assert.rejects(
+    queryDataJud({
+      tribunal: 'TJPE',
+      caseNumber: '00012345620248170001',
+      apiKey: 'test-key',
+      fetchImpl: async () => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }); },
+    }),
+    (error) => error.name === 'DataJudServiceError' && error.code === 'upstream_timeout' && error.status === 504,
+  );
+});
+
+test('converte falha HTTP externa em erro seguro sem expor o corpo', async () => {
+  await assert.rejects(
+    queryDataJud({
+      tribunal: 'TJPE',
+      caseNumber: '00012345620248170001',
+      apiKey: 'test-key',
+      fetchImpl: async () => new Response('segredo do upstream', { status: 500 }),
+    }),
+    (error) => error.name === 'DataJudServiceError' && error.code === 'upstream_error' && error.status === 502 && !error.message.includes('segredo'),
+  );
+});

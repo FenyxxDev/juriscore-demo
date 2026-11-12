@@ -10,9 +10,7 @@ const REQUEST_BODY_LIMIT = 2048;
 
 function allowedOrigins() {
   const configured = Deno.env.get('DATAJUD_ALLOWED_ORIGINS');
-  return configured
-    ? configured.split(',').map((origin) => origin.trim()).filter(Boolean)
-    : DEFAULT_ALLOWED_ORIGINS;
+  return configured ? configured.split(',').map((origin) => origin.trim()).filter(Boolean) : DEFAULT_ALLOWED_ORIGINS;
 }
 
 function corsHeaders(origin: string | null) {
@@ -30,6 +28,10 @@ function json(body: Record<string, unknown>, status = 200, origin: string | null
     status,
     headers: { ...corsHeaders(origin), 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
+}
+
+function errorJson(code: string, message: string, status: number, origin: string | null) {
+  return json({ error: message, code }, status, origin);
 }
 
 function parseOrigin(request: Request): { origin: string | null; blocked: boolean } {
@@ -73,36 +75,34 @@ Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { status: 204, headers: corsHeaders(origin) });
   if (request.method !== 'POST') return json({ error: 'Método não permitido.' }, 405, origin);
 
-  if (Deno.env.get('DATAJUD_ENABLED') !== 'true') {
-    return json({ error: 'A integração DataJud está desativada.' }, 503, origin);
-  }
-
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const apiKey = Deno.env.get('DATAJUD_API_KEY');
-  if (!supabaseUrl || !anonKey || !serviceRoleKey || !apiKey) {
-    return json({ error: 'A integração DataJud não está configurada no servidor.' }, 503, origin);
-  }
-
   const authorization = request.headers.get('Authorization') ?? '';
   const bearer = /^Bearer\s+(\S+)$/i.exec(authorization);
-  if (!bearer) return json({ error: 'Autenticação obrigatória.' }, 401, origin);
+  if (!bearer) return errorJson('unauthenticated', 'Autenticação obrigatória.', 401, origin);
+  if (!supabaseUrl || !anonKey || !serviceRoleKey || !apiKey) {
+    return errorJson('integration_unconfigured', 'A integração DataJud não está configurada no servidor.', 503, origin);
+  }
+  if (Deno.env.get('DATAJUD_ENABLED') !== 'true') {
+    return errorJson('integration_disabled', 'A integração DataJud está desativada.', 503, origin);
+  }
 
   const rawBody = await readBoundedBody(request);
-  if (rawBody === null) return json({ error: 'Pedido demasiado grande.' }, 413, origin);
+  if (rawBody === null) return errorJson('invalid_request', 'Pedido demasiado grande.', 413, origin);
   let payload: unknown;
   try {
     payload = JSON.parse(rawBody);
   } catch {
-    return json({ error: 'Pedido inválido.' }, 400, origin);
+    return errorJson('invalid_request', 'Pedido inválido.', 400, origin);
   }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return json({ error: 'Pedido inválido.' }, 400, origin);
+    return errorJson('invalid_request', 'Pedido inválido.', 400, origin);
   }
   const body = payload as Record<string, unknown>;
   if (Object.keys(body).length !== 1 || typeof body.processId !== 'string' || !body.processId.trim() || body.processId.length > 128) {
-    return json({ error: 'Informe apenas o identificador de um processo.' }, 400, origin);
+    return errorJson('invalid_request', 'Informe apenas o identificador de um processo.', 400, origin);
   }
 
   try {
@@ -112,7 +112,7 @@ Deno.serve(async (request: Request) => {
     });
     const { data: authData, error: authError } = await callerClient.auth.getUser(bearer[1]);
     const user = authData.user;
-    if (authError || !user) return json({ error: 'Sessão inválida ou expirada.' }, 401, origin);
+    if (authError || !user) return errorJson('unauthenticated', 'Sessão inválida ou expirada.', 401, origin);
 
     const { data: process, error: processError } = await callerClient
       .from('processes')
@@ -120,37 +120,25 @@ Deno.serve(async (request: Request) => {
       .eq('owner_id', user.id)
       .eq('id', body.processId.trim())
       .maybeSingle();
-    if (processError) return json({ error: 'Não foi possível validar o processo.' }, 502, origin);
-    if (!process) return json({ error: 'Processo não encontrado nesta conta.' }, 404, origin);
+    if (processError) return errorJson('process_validation_failed', 'Não foi possível validar o processo.', 502, origin);
+    if (!process) return errorJson('process_not_found', 'Processo não encontrado nesta conta.', 404, origin);
 
     const caseNumber = normalizeCaseNumber(process.case_number);
-    if (!caseNumber) return json({ error: 'O número CNJ deste processo não está num formato consultável.' }, 422, origin);
-    if (!resolveTribunalAlias(process.tribunal)) return json({ error: 'O tribunal deste processo ainda não é suportado.' }, 422, origin);
+    if (!caseNumber) return errorJson('invalid_case_number', 'O número CNJ deste processo não está num formato consultável.', 422, origin);
+    if (!resolveTribunalAlias(process.tribunal)) return errorJson('unsupported_tribunal', 'O tribunal deste processo ainda não é suportado.', 422, origin);
 
-    const adminClient = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
+    const adminClient = createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } });
+    const { data: allowed, error: rateLimitError } = await adminClient.rpc('consume_datajud_request', { p_user_id: user.id });
+    if (rateLimitError) return errorJson('rate_limit_unavailable', 'O controlo de consultas está indisponível.', 503, origin);
+    if (allowed !== true) return new Response(JSON.stringify({ error: 'Limite de consultas atingido. Tente novamente mais tarde.', code: 'rate_limited' }), {
+      status: 429,
+      headers: { ...corsHeaders(origin), 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': '60' },
     });
-    const { data: allowed, error: rateLimitError } = await adminClient.rpc('consume_datajud_request', {
-      p_user_id: user.id,
-    });
-    if (rateLimitError) return json({ error: 'O controlo de consultas está indisponível.' }, 503, origin);
-    if (allowed !== true) {
-      return new Response(JSON.stringify({ error: 'Limite de consultas atingido. Tente novamente mais tarde.' }), {
-        status: 429,
-        headers: { ...corsHeaders(origin), 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': '60' },
-      });
-    }
 
-    const result = await queryDataJud({
-      tribunal: process.tribunal,
-      caseNumber,
-      apiKey,
-    });
+    const result = await queryDataJud({ tribunal: process.tribunal, caseNumber, apiKey });
     return json({ ok: true, ...result }, 200, origin);
   } catch (error) {
-    if (error instanceof DataJudServiceError) {
-      return json({ error: error.message }, error.status, origin);
-    }
-    return json({ error: 'Erro interno ao consultar DataJud.' }, 500, origin);
+    if (error instanceof DataJudServiceError) return errorJson(error.code, error.message, error.status, origin);
+    return errorJson('internal_error', 'Erro interno ao consultar DataJud.', 500, origin);
   }
 });
