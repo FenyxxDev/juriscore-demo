@@ -72,7 +72,7 @@ async function readBoundedBody(request: Request): Promise<string | null> {
 Deno.serve(async (request: Request) => {
   const { origin, blocked } = parseOrigin(request);
   if (blocked) return json({ error: 'Origem não autorizada.' }, 403, null);
-  if (request.method === 'OPTIONS') return new Response('ok', { status: 204, headers: corsHeaders(origin) });
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
   if (request.method !== 'POST') return json({ error: 'Método não permitido.' }, 405, origin);
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
