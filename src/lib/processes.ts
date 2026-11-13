@@ -2,6 +2,7 @@ import type { Audiencia, Modalidade, Movimentacao, Parte, Prioridade, Processo, 
 import { toneOf } from '../data';
 import type { StatusTone } from '../components/ui';
 import { supabase } from './supabase';
+import type { DataJudMovement } from './datajud';
 
 type ProcessRow = {
   id: string;
@@ -36,6 +37,7 @@ type MovementRow = {
   description: string;
   author: string;
   occurred_at: string;
+  source: string;
 };
 type DeadlineRow = {
   id: string;
@@ -129,6 +131,7 @@ function mapProcess(
     tipo: movement.movement_type,
     descricao: movement.description,
     autor: movement.author,
+    origem: movement.source === 'datajud' ? 'datajud' : 'manual',
   }));
   const mappedDeadlines: Prazo[] = deadlines.map((deadline) => {
     const data = formatSqlDate(deadline.due_date);
@@ -197,7 +200,7 @@ export async function listProcesses(): Promise<Processo[]> {
     client.from('clients').select('id, name').eq('owner_id', user.id),
     client.from('process_parties').select('id, process_id, name, role, document, representative')
       .eq('owner_id', user.id).in('process_id', processIds),
-    client.from('process_movements').select('id, process_id, movement_type, description, author, occurred_at')
+    client.from('process_movements').select('id, process_id, movement_type, description, author, occurred_at, source')
       .eq('owner_id', user.id).in('process_id', processIds).order('occurred_at', { ascending: false }),
     client.from('process_deadlines').select('id, process_id, description, due_date, responsible, priority, status')
       .eq('owner_id', user.id).in('process_id', processIds).order('due_date', { ascending: true }),
@@ -375,4 +378,44 @@ export async function setProcessStatus(
     p_author: author,
   });
   if (error) throw error;
+}
+
+export async function syncDataJudMovements(processId: string, movements: DataJudMovement[]): Promise<number> {
+  if (movements.length === 0) return 0;
+  const client = db();
+  const user = await getCurrentUser();
+  const { data: process, error: processError } = await client.from('processes')
+    .select('id').eq('owner_id', user.id).eq('id', processId).maybeSingle();
+  if (processError) throw processError;
+  if (!process) throw new Error('Processo não encontrado nesta conta.');
+
+  const { data: existing, error: existingError } = await client.from('process_movements')
+    .select('movement_type, description, occurred_at').eq('owner_id', user.id)
+    .eq('process_id', processId).eq('source', 'datajud');
+  if (existingError) throw existingError;
+  const existingKeys = new Set((existing ?? []).map((row) => `${row.occurred_at}|${row.movement_type}|${row.description}`));
+  const rows = movements.map((movement) => {
+    const type = `DataJud · ${movement.name}`;
+    const details = [movement.code ? `Código ${movement.code}` : '', ...movement.complements, movement.court ?? ''].filter(Boolean).join(' · ');
+    const description = details || 'Movimentação disponibilizada pelo CNJ/DataJud.';
+    return {
+      owner_id: user.id,
+      process_id: processId,
+      movement_type: type,
+      description,
+      author: 'CNJ · DataJud',
+      actor_id: user.id,
+      source: 'datajud',
+      occurred_at: movement.date,
+    };
+  }).filter((row) => {
+    const key = `${row.occurred_at}|${row.movement_type}|${row.description}`;
+    if (existingKeys.has(key)) return false;
+    existingKeys.add(key);
+    return true;
+  });
+  if (rows.length === 0) return 0;
+  const { error } = await client.from('process_movements').insert(rows);
+  if (error) throw error;
+  return rows.length;
 }

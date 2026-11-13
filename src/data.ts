@@ -121,6 +121,7 @@ export type Movimentacao = {
   tipo: string;
   descricao: string;
   autor: string;
+  origem?: 'manual' | 'datajud';
 };
 
 export type Documento = {

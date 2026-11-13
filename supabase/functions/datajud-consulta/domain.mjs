@@ -39,7 +39,11 @@ export function buildSearchPayload(caseNumber) {
   return {
     size: 1,
     track_total_hits: false,
-    _source: ['numeroProcesso', 'nivelSigilo', 'classe.nome', 'dataAjuizamento', 'grau'],
+    _source: [
+      'numeroProcesso', 'nivelSigilo', 'classe.nome', 'dataAjuizamento', 'grau',
+      'movimentos.codigo', 'movimentos.nome', 'movimentos.dataHora',
+      'movimentos.complementosTabelados', 'movimentos.orgaoJulgador.nomeOrgao',
+    ],
     query: { match: { numeroProcesso: caseNumber } },
   };
 }
@@ -58,6 +62,28 @@ function safeDate(value) {
   return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== match[1] ? null : match[1];
 }
 
+function safeDateTime(value) {
+  if (typeof value !== 'string' || value.length > 48) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function sanitizeMovement(value) {
+  if (!value || typeof value !== 'object') return null;
+  const date = safeDateTime(value.dataHora);
+  const name = safeLabel(value.nome, 180);
+  if (!date || !name) return null;
+  const code = Number.isInteger(value.codigo) ? value.codigo : null;
+  const complements = Array.isArray(value.complementosTabelados)
+    ? value.complementosTabelados
+      .slice(0, 10)
+      .map((item) => safeLabel(item?.nome ?? item?.descricao, 120))
+      .filter(Boolean)
+    : [];
+  const court = safeLabel(value.orgaoJulgador?.nomeOrgao, 160);
+  return { code, name, date, complements, court };
+}
+
 export function sanitizeDataJudHit(hit, expectedCaseNumber) {
   const source = hit && typeof hit === 'object' ? hit._source : null;
   if (!source || typeof source !== 'object' || Number(source.nivelSigilo) !== 0) return null;
@@ -68,13 +94,18 @@ export function sanitizeDataJudHit(hit, expectedCaseNumber) {
     dataAjuizamento: safeDate(source.dataAjuizamento),
     grau: safeLabel(source.grau, 30),
   };
-  if (!metadata.classe && !metadata.dataAjuizamento && !metadata.grau) return null;
-  return metadata;
+  const movements = Array.isArray(source.movimentos)
+    ? source.movimentos.map(sanitizeMovement).filter(Boolean).slice(0, 250)
+    : [];
+  if (!metadata.classe && !metadata.dataAjuizamento && !metadata.grau && movements.length === 0) return null;
+  return { metadata, movements };
 }
 
 export function sanitizeDataJudResponse(payload, expectedCaseNumber) {
   const hits = payload?.hits?.hits;
   if (!Array.isArray(hits)) throw new Error('Resposta inválida da fonte DataJud.');
-  const metadata = sanitizeDataJudHit(hits[0], expectedCaseNumber);
-  return { found: metadata !== null, metadata };
+  const result = sanitizeDataJudHit(hits[0], expectedCaseNumber);
+  return result
+    ? { found: true, metadata: result.metadata, movements: result.movements }
+    : { found: false, metadata: null, movements: [] };
 }

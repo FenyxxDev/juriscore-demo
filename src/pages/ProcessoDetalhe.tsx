@@ -34,7 +34,7 @@ import { AIFailed, AIResultView, AIWorking } from '../components/AIResult';
 import { AreaTag } from '../components/Areas';
 import { NovoEventoModal } from '../components/NovoEventoModal';
 import { procLink, useStore } from '../store';
-import { addProcessMovement, completeProcessDeadline, createProcessDeadline, getProcessByNumber, setProcessStatus, updateProcess } from '../lib/processes';
+import { addProcessMovement, completeProcessDeadline, createProcessDeadline, getProcessByNumber, setProcessStatus, syncDataJudMovements, updateProcess } from '../lib/processes';
 import { downloadDocument, listDocumentsForCase } from '../lib/documents';
 import { consultarDataJud, DataJudError, type DataJudResult } from '../lib/datajud';
 import { type AIResult, useAI } from '../ai';
@@ -111,13 +111,17 @@ export function ProcessoDetalhe() {
       toast({ tone: 'error', message: 'Este processo não tem um identificador persistido para consulta segura.' });
       return;
     }
-    setDataJudLoading(true);
+      setDataJudLoading(true);
     setDataJud(null);
     setDataJudError(null);
-    try {
-      const result = await consultarDataJud(proc.id);
+      try {
+        const result = await consultarDataJud(proc.id);
+      const imported = result.found ? await syncDataJudMovements(proc.id, result.movements) : 0;
       setDataJud({ result, consultedAt: new Date().toLocaleString('pt-BR') });
-      toast({ tone: 'success', message: result.found ? 'Dados públicos recebidos do DataJud.' : 'O DataJud não encontrou correspondência pública.' });
+      if (imported > 0) setReload((value) => value + 1);
+      toast({ tone: 'success', message: result.found
+        ? imported > 0 ? `${imported} nova(s) movimentação(ões) importada(s) do DataJud.` : 'DataJud consultado; não há movimentações novas.'
+        : 'O DataJud não encontrou correspondência pública.' });
     } catch (error) {
       const message = error instanceof DataJudError ? error.message : 'Não foi possível consultar o DataJud.';
       setDataJudError(message);
@@ -197,7 +201,7 @@ export function ProcessoDetalhe() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-ink">Dados públicos do DataJud</h2>
-              <p className="mt-1 text-xs text-muted">Consulta efetuada em {dataJud.consultedAt}. Estes dados não alteram o registo do processo.</p>
+              <p className="mt-1 text-xs text-muted">Consulta efetuada em {dataJud.consultedAt}. Movimentos novos são guardados na Timeline com origem CNJ/DataJud.</p>
             </div>
             <span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-muted">Fonte: CNJ · DataJud</span>
           </div>
@@ -206,6 +210,7 @@ export function ProcessoDetalhe() {
               <div><dt className="text-xs text-muted">Classe processual</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.metadata.classe ?? 'Não informado'}</dd></div>
               <div><dt className="text-xs text-muted">Data de ajuizamento</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.metadata.dataAjuizamento ?? 'Não informado'}</dd></div>
               <div><dt className="text-xs text-muted">Grau</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.metadata.grau ?? 'Não informado'}</dd></div>
+              <div><dt className="text-xs text-muted">Movimentações recebidas</dt><dd className="mt-1 text-sm text-ink">{dataJud.result.movements.length}</dd></div>
             </dl>
           ) : (
             <p className="mt-4 text-sm text-muted">Não foi encontrada correspondência pública, ou não havia metadados permitidos para apresentar.</p>
@@ -572,7 +577,10 @@ function TimelineTab({ proc, item }: { proc: Proc; item: string | null }) {
                 <span className={cx('relative mt-1 h-2 w-2 rounded-full ring-4 ring-white', i === 0 ? 'bg-[var(--color-teal)]' : 'bg-[var(--color-faint)]')} />
               </div>
               <div className={cx('-mx-2 mb-2 min-w-0 rounded-md px-2 pb-4', hl(item === t.id))}>
-                <p className="text-[14px] font-semibold leading-tight text-ink">{t.tipo}</p>
+                <p className="flex flex-wrap items-center gap-2 text-[14px] font-semibold leading-tight text-ink">
+                  {t.tipo}
+                  {t.origem === 'datajud' && <span className="rounded bg-teal/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-teal">CNJ · DataJud</span>}
+                </p>
                 <p className="mt-1 text-[13px] leading-relaxed text-muted">{t.descricao}</p>
                 <p className="mt-1.5 text-[12px] text-[var(--color-faint)]">{t.autor}{t.data.includes(' · ') && ` · ${t.data.split(' · ')[1]}`}</p>
                 {docs.length > 0 && (

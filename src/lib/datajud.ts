@@ -6,10 +6,19 @@ export type DataJudMetadata = {
   grau: string | null;
 };
 
+export type DataJudMovement = {
+  code: number | null;
+  name: string;
+  date: string;
+  complements: string[];
+  court: string | null;
+};
+
 export type DataJudResult = {
   ok: true;
   found: boolean;
   metadata: DataJudMetadata | null;
+  movements: DataJudMovement[];
 };
 
 export type DataJudErrorCode =
@@ -69,7 +78,7 @@ export async function consultarDataJud(processId: string): Promise<DataJudResult
 
   const { data, error } = await supabase.functions.invoke('datajud-consulta', { body: { processId } });
   if (error) throw await errorFromInvocation(error);
-  if (!data || data.ok !== true || typeof data.found !== 'boolean' || (data.found && !data.metadata)) {
+  if (!data || data.ok !== true || typeof data.found !== 'boolean' || !Array.isArray(data.movements) || (data.found && !data.metadata)) {
     throw new DataJudError('unknown', 'A resposta da consulta DataJud é inválida.');
   }
   return data as DataJudResult;
