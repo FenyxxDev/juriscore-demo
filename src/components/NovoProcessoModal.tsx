@@ -150,7 +150,6 @@ export function NovoProcessoModal({
             hidden={step < STEPS.length - 1}
             disabled={step < STEPS.length - 1 || saving}
             icon={<Check size={16} />}
-            loading={saving}
             onClick={() => void finish()}
           >
             Criar processo
