@@ -38,8 +38,8 @@ export function NovoProcessoModal({
   const [vara, setVara] = useState('1ª Vara Cível');
   const [resumo, setResumo] = useState('');
   const [responsavel, setResponsavel] = useState('');
-  const [partes, setPartes] = useState<{ nome: string; papel: string }[]>([
-    { nome: '', papel: 'Autor' },
+  const [partes, setPartes] = useState<{ id: string; nome: string; papel: string }[]>([
+    { id: crypto.randomUUID(), nome: '', papel: 'Autor' },
   ]);
 
   useEffect(() => {
@@ -79,7 +79,7 @@ export function NovoProcessoModal({
     setNumero('');
     setArea('Direito Civil');
     setResumo('');
-    setPartes([{ nome: '', papel: 'Autor' }]);
+    setPartes([{ id: crypto.randomUUID(), nome: '', papel: 'Autor' }]);
     setFormError('');
   };
 
@@ -96,7 +96,7 @@ export function NovoProcessoModal({
         comarca,
         vara,
         resumo,
-        partes: partes.filter((party) => party.nome.trim()).map((party) => ({ ...party, rep: responsavel })),
+        partes: partes.filter((party) => party.nome.trim()).map(({ id: _id, ...party }) => ({ ...party, rep: responsavel })),
       });
       try {
         await refreshWorkspace(user.id);
@@ -130,21 +130,31 @@ export function NovoProcessoModal({
       footer={
         <>
           <Button
+            type="button"
             variant="secondary"
             disabled={saving}
             onClick={() => (step === 0 ? (onClose(), reset()) : setStep((s) => s - 1))}
           >
             {step === 0 ? 'Cancelar' : 'Voltar'}
           </Button>
-          {step < STEPS.length - 1 ? (
-            <Button disabled={!canNext || saving || (step === 0 && (loadingClients || clients.length === 0))} onClick={() => setStep((s) => s + 1)}>
-              Continuar
-            </Button>
-          ) : (
-            <Button icon={<Check size={16} />} loading={saving} onClick={() => void finish()}>
-              Criar processo
-            </Button>
-          )}
+          <Button
+            type="button"
+            hidden={step >= STEPS.length - 1}
+            disabled={step >= STEPS.length - 1 || !canNext || saving || (step === 0 && (loadingClients || clients.length === 0))}
+            onClick={() => setStep((s) => s + 1)}
+          >
+            Continuar
+          </Button>
+          <Button
+            type="button"
+            hidden={step < STEPS.length - 1}
+            disabled={step < STEPS.length - 1 || saving}
+            icon={<Check size={16} />}
+            loading={saving}
+            onClick={() => void finish()}
+          >
+            Criar processo
+          </Button>
         </>
       }
     >
@@ -174,8 +184,7 @@ export function NovoProcessoModal({
 
       {formError && <p role="alert" className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">{formError}</p>}
 
-      {step === 0 && (
-        <div className="flex flex-col gap-4">
+      <div hidden={step !== 0} className="flex flex-col gap-4">
           <Field label="Número do processo" htmlFor="np-numero" required>
             <Input id="np-numero" value={numero} onChange={(e) => setNumero(e.target.value)} placeholder="Ex.: 0001234-56.2026.8.17.0001" />
           </Field>
@@ -227,19 +236,17 @@ export function NovoProcessoModal({
               className="w-full resize-none rounded-lg border border-line bg-white px-3 py-2.5 text-sm text-ink placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal/40 focus:border-teal"
             />
           </Field>
-        </div>
-      )}
+      </div>
 
-      {step === 1 && (
+      <div hidden={step !== 1}>
         <Field label="Advogado responsável" htmlFor="np-resp" hint="Atribua quem conduzirá o processo.">
           <Input id="np-resp" value={responsavel} onChange={(e) => setResponsavel(e.target.value)} />
         </Field>
-      )}
+      </div>
 
-      {step === 2 && (
-        <div className="flex flex-col gap-3">
+      <div hidden={step !== 2} className="flex flex-col gap-3">
           {partes.map((p, i) => (
-            <div key={i} className="flex items-end gap-2">
+            <div key={p.id} className="flex items-end gap-2">
               <div className="flex-1">
                 <Field label={i === 0 ? 'Nome da parte' : ''} htmlFor={`np-parte-${i}`}>
                   <Input
@@ -265,6 +272,7 @@ export function NovoProcessoModal({
                 ))}
               </Select>
               <button
+                type="button"
                 onClick={() => setPartes((ps) => ps.filter((_, j) => j !== i))}
                 aria-label="Remover parte"
                 className="mb-1 rounded-md p-2 text-muted hover:bg-slate-100 hover:text-danger"
@@ -274,19 +282,17 @@ export function NovoProcessoModal({
             </div>
           ))}
           <button
-            onClick={() => setPartes((ps) => [...ps, { nome: '', papel: 'Réu' }])}
+            type="button"
+            onClick={() => setPartes((ps) => [...ps, { id: crypto.randomUUID(), nome: '', papel: 'Réu' }])}
             className="flex w-fit items-center gap-1.5 text-sm font-medium text-teal hover:underline"
           >
             <Plus size={15} /> Adicionar parte
           </button>
-        </div>
-      )}
+      </div>
 
-      {step === 3 && (
-        <div className="rounded-lg border border-line bg-slate-50 p-4 text-sm leading-relaxed text-muted">
+      <div hidden={step !== 3} className="rounded-lg border border-line bg-slate-50 p-4 text-sm leading-relaxed text-muted">
           O envio de ficheiros ainda não está ligado ao armazenamento privado. Não vamos registar nomes como se os ficheiros tivessem sido enviados. Depois de criar o processo, o módulo Documentos será integrado para aceitar anexos reais.
-        </div>
-      )}
+      </div>
     </Modal>
   );
 }
