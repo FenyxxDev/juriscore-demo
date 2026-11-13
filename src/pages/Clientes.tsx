@@ -16,6 +16,7 @@ import {
 import { AREAS, type Cliente } from '../data';
 import { useStore } from '../store';
 import { supabase } from '../lib/supabase';
+import { consultaCpf } from '../lib/consultaCpf';
 
 const PER_PAGE = 6;
 
@@ -289,7 +290,47 @@ export function NovoClienteModal({
   const [nome, setNome] = useState('');
   const [tipo, setTipo] = useState<'Pessoa Física' | 'Pessoa Jurídica'>('Pessoa Física');
   const [documento, setDocumento] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [consulting, setConsulting] = useState(false);
+  const [lookupMessage, setLookupMessage] = useState('');
   const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      setNome('');
+      setTipo('Pessoa Física');
+      setDocumento('');
+      setBirthDate('');
+      setLookupMessage('');
+      setErr('');
+    }
+  }, [open]);
+
+  const buscarCpf = async () => {
+    setLookupMessage('');
+    if (tipo !== 'Pessoa Física') {
+      setLookupMessage('A consulta está disponível somente para Pessoa Física.');
+      return;
+    }
+    if (!documento.trim() || !birthDate) {
+      setLookupMessage('Informe CPF e data de nascimento para consultar.');
+      return;
+    }
+    setConsulting(true);
+    try {
+      const result = await consultaCpf(documento, birthDate);
+      if (!result.name?.trim()) {
+        setLookupMessage('Consulta concluída, mas não foi retornado um nome para confirmação.');
+        return;
+      }
+      setNome(result.name.trim());
+      setLookupMessage(`Nome encontrado. Situação cadastral: ${result.status ?? 'não informada'}. Confira os dados antes de salvar.`);
+    } catch (error) {
+      setLookupMessage(error instanceof Error ? error.message : 'Não foi possível consultar o CPF. Tente novamente.');
+    } finally {
+      setConsulting(false);
+    }
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -301,7 +342,9 @@ export function NovoClienteModal({
       if (!saved) return;
       setNome('');
       setDocumento('');
+      setBirthDate('');
       setErr('');
+      setLookupMessage('');
     }).catch(() => setErr('Não foi possível salvar o cliente. Tente novamente.'));
   };
 
@@ -350,6 +393,19 @@ export function NovoClienteModal({
             placeholder="000.000.000-00"
           />
         </Field>
+        {tipo === 'Pessoa Física' && (
+          <>
+            <Field label="Data de nascimento" htmlFor="cli-birth-date">
+              <Input id="cli-birth-date" type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+            </Field>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" variant="secondary" onClick={() => void buscarCpf()} disabled={consulting}>
+                {consulting ? 'Consultando...' : 'Buscar'}
+              </Button>
+              {lookupMessage && <p role="status" className="text-[13px] text-muted">{lookupMessage}</p>}
+            </div>
+          </>
+        )}
       </form>
     </Modal>
   );
