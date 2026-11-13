@@ -2,7 +2,7 @@ import { buildSearchPayload, resolveTribunalAlias, sanitizeDataJudResponse } fro
 
 const DATAJUD_BASE_URL = 'https://api-publica.datajud.cnj.jus.br';
 const RESPONSE_LIMIT_BYTES = 128 * 1024;
-const REQUEST_TIMEOUT_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export class DataJudServiceError extends Error {
   constructor(code, status, message) {
