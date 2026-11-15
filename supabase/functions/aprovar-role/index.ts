@@ -79,6 +79,7 @@ Deno.serve(async (request: Request) => {
     const appMetadata = {
       ...(target.app_metadata ?? {}),
       perfil: requestedProfile,
+      perfil_status: 'aprovado',
       perfil_aprovado_por: caller.id,
       perfil_aprovado_em: new Date().toISOString(),
     };
