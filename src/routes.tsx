@@ -47,7 +47,7 @@ export const router = createBrowserRouter([
       { path: '/audiencias', element: <Audiencias /> },
       { path: '/documentos', element: <Documentos /> },
       { path: '/pesquisa', element: <Pesquisa /> },
-      { path: '/usuarios', element: <Usuarios /> },
+      { path: '/usuarios', element: <RoleOnly allowed={['Administrador']}><Usuarios /></RoleOnly> },
       { path: '/equipe', element: <Equipe /> },
       { path: '/configuracoes', element: <Configuracoes /> },
       { path: '/perfil', element: <Navigate to="/configuracoes" replace /> },

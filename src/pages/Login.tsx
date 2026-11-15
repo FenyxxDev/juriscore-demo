@@ -95,7 +95,7 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [senhaError, setSenhaError] = useState('');
-  const [erro, setErro] = useState<null | 'credenciais' | 'inativo' | 'aprovacao'>(null);
+  const [erro, setErro] = useState<null | 'credenciais' | 'inativo' | 'aprovacao' | 'rejeitado'>(null);
   const [recuperar, setRecuperar] = useState(false);
 
   if (authed) return <Navigate to="/dashboard" replace />;
@@ -116,11 +116,18 @@ export function Login() {
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: senha });
     if (error || !data.user) {
       setLoading(false);
-      return setErro('credenciais');
+      const errorCode = (error as unknown as { code?: unknown } | null)?.code;
+      const errorMessage = error?.message.toLowerCase() ?? '';
+      return setErro(errorCode === 'user_banned' || errorMessage.includes('banned') ? 'inativo' : 'credenciais');
     }
     const metadata = data.user.user_metadata ?? {};
     const trustedPerfil = data.user.app_metadata?.perfil;
     const perfilSolicitado = metadata.perfil_solicitado ?? metadata.perfil;
+    if (data.user.app_metadata?.perfil_status === 'rejeitado') {
+      await supabase.auth.signOut({ scope: 'local' });
+      setLoading(false);
+      return setErro('rejeitado');
+    }
     if (['Administrador', 'Assistente'].includes(perfilSolicitado) && trustedPerfil !== perfilSolicitado) {
       await supabase.auth.signOut({ scope: 'local' });
       setLoading(false);
@@ -168,13 +175,15 @@ export function Login() {
         <div className="mt-5">
           <Alert
             tone="error"
-            title={erro === 'credenciais' ? 'E-mail ou senha incorretos.' : erro === 'inativo' ? 'Conta desativada.' : 'Solicitação de perfil aguardando aprovação.'}
+            title={erro === 'credenciais' ? 'E-mail ou senha incorretos.' : erro === 'inativo' ? 'Conta desativada.' : erro === 'rejeitado' ? 'Perfil não liberado.' : 'Solicitação de perfil aguardando aprovação.'}
           >
             {erro === 'credenciais'
               ? 'Verifique os dados e tente novamente.'
               : erro === 'inativo'
                 ? 'Procure o administrador do escritório para reativar o acesso.'
-                : 'Um administrador precisa aprovar o perfil solicitado antes de liberar o acesso. A escolha no cadastro, por si só, não concede permissões.'}
+                : erro === 'rejeitado'
+                  ? 'O administrador não liberou o perfil solicitado. Entre em contato com o responsável pelo JurisCore.'
+                  : 'Um administrador precisa aprovar o perfil solicitado antes de liberar o acesso. A escolha no cadastro, por si só, não concede permissões.'}
           </Alert>
         </div>
       )}
