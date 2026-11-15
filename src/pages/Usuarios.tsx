@@ -46,6 +46,11 @@ export function Usuarios() {
     setErro('');
     try {
       const result = await listarUsuariosAdmin(page);
+      if (!result || !Array.isArray(result.users) || typeof result.hasMore !== 'boolean') {
+        setUsuarios([]);
+        setTemMais(false);
+        throw new Error('O servidor devolveu uma lista de contas inválida. Atualize a página e tente novamente.');
+      }
       setUsuarios(result.users);
       setTemMais(result.hasMore);
     } catch (error) {
