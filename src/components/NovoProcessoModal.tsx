@@ -22,10 +22,10 @@ export function NovoProcessoModal({
 }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const { refreshWorkspace, user, advogados } = useStore();
+  const { refreshWorkspace, user, advogadosOrganizacao } = useStore();
   const advogadosAtivos = useMemo(
-    () => advogados.filter((advogado) => advogado.perfil === 'Advogado' && advogado.ativo),
-    [advogados],
+    () => advogadosOrganizacao.filter((advogado) => advogado.ativo),
+    [advogadosOrganizacao],
   );
 
   const [clients, setClients] = useState<ClientOption[]>([]);
@@ -248,7 +248,7 @@ export function NovoProcessoModal({
       </div>
 
       <div hidden={step !== 1}>
-        <Field label="Advogado responsável" htmlFor="np-resp" hint="Selecione um advogado ativo da conta ou informe outro nome.">
+        <Field label="Advogado responsável" htmlFor="np-resp" hint="Selecione um advogado ativo da organização ou informe o nome manualmente.">
           <div className="flex flex-col gap-2">
             <Select
               id="np-resp"
@@ -277,7 +277,7 @@ export function NovoProcessoModal({
               />
             )}
             {advogadosAtivos.length <= 1 && (
-              <p className="text-[12px] text-muted">A conta ainda não disponibiliza a equipa de advogados de outros logins do escritório.</p>
+              <p className="text-[12px] text-muted">Ainda não há advogados associados a uma organização. Pode continuar e informar o responsável manualmente.</p>
             )}
           </div>
         </Field>

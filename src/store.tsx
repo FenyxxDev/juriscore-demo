@@ -7,6 +7,7 @@ import {
   type Compromisso,
   type Documento,
   type Movimentacao,
+  type OrganizationLawyer,
   type Parte,
   type Perfil,
   type Prazo,
@@ -119,6 +120,7 @@ type State = {
   session: { userId: string; lembrar: boolean } | null;
   clientes: Cliente[];
   advogados: Advogado[];
+  advogadosOrganizacao: OrganizationLawyer[];
   processos: Processo[];
   tarefas: Tarefa[];
   compromissos: Compromisso[];
@@ -170,13 +172,13 @@ function reducer(state: State, action: Action): State {
       const changedAccount = state.session?.userId !== action.userId;
       return {
         ...state,
-        ...(changedAccount ? { clientes: [], processos: [], tarefas: [], compromissos: [], lidas: [], prefs: DEFAULT_PREFS, notifPrefs: DEFAULT_NOTIF_PREFS } : {}),
+        ...(changedAccount ? { clientes: [], advogadosOrganizacao: [], processos: [], tarefas: [], compromissos: [], lidas: [], prefs: DEFAULT_PREFS, notifPrefs: DEFAULT_NOTIF_PREFS } : {}),
         session: { userId: action.userId, lembrar: action.lembrar },
         advogados: (changedAccount ? state.advogados.filter((a) => a.id === action.userId) : state.advogados)
           .map((a) => (a.id === action.userId ? { ...a, ultimaAtividade: agora() } : a)),
       };
     case 'logout':
-      return { ...state, session: null, clientes: [], advogados: [], processos: [], tarefas: [], compromissos: [], lidas: [], prefs: DEFAULT_PREFS, notifPrefs: DEFAULT_NOTIF_PREFS };
+      return { ...state, session: null, clientes: [], advogados: [], advogadosOrganizacao: [], processos: [], tarefas: [], compromissos: [], lidas: [], prefs: DEFAULT_PREFS, notifPrefs: DEFAULT_NOTIF_PREFS };
     case 'hydrateWorkspace': {
       if (state.session?.userId !== action.ownerId) return state;
       const { settings, ...workspace } = action.snapshot;
@@ -375,6 +377,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     session: null,
     clientes: [],
     advogados: [],
+    advogadosOrganizacao: [],
     processos: [],
     tarefas: [],
     compromissos: [],

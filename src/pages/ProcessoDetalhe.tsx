@@ -298,8 +298,8 @@ export function ProcessoDetalhe() {
 
 function EditarProcesso({ proc, onClose, onSaved }: { proc: Proc; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
-  const { advogados } = useStore();
-  const advogadosAtivos = advogados.filter((advogado) => advogado.perfil === 'Advogado' && advogado.ativo);
+  const { advogadosOrganizacao } = useStore();
+  const advogadosAtivos = advogadosOrganizacao.filter((advogado) => advogado.ativo);
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState({ responsavel: proc.responsavel, area: proc.area, tribunal: proc.tribunal, comarca: proc.comarca, vara: proc.vara, resumo: proc.resumo, observacoes: proc.observacoes ?? '' });
   const [responsavelMode, setResponsavelMode] = useState<'equipe' | 'manual'>(() =>
@@ -333,7 +333,7 @@ function EditarProcesso({ proc, onClose, onSaved }: { proc: Proc; onClose: () =>
       }
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Advogado responsável" htmlFor="ep-r" hint="Selecione um advogado ativo da conta ou informe outro nome.">
+        <Field label="Advogado responsável" htmlFor="ep-r" hint="Selecione um advogado ativo da organização ou informe o nome manualmente.">
           <div className="flex flex-col gap-2">
             <Select
               id="ep-r"
@@ -362,7 +362,7 @@ function EditarProcesso({ proc, onClose, onSaved }: { proc: Proc; onClose: () =>
               />
             )}
             {advogadosAtivos.length <= 1 && (
-              <p className="text-[12px] text-muted">A conta ainda não disponibiliza a equipa de advogados de outros logins do escritório.</p>
+              <p className="text-[12px] text-muted">Ainda não há advogados associados a uma organização. Pode continuar e informar o responsável manualmente.</p>
             )}
           </div>
         </Field>

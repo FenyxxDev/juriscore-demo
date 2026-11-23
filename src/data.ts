@@ -84,6 +84,18 @@ export type Advogado = {
 /** Alias semântico: toda conta do sistema é um membro da equipe. */
 export type Usuario = Advogado;
 
+/** Perfil profissional visível apenas aos membros aceites da mesma organização. */
+export type OrganizationLawyer = {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  nome: string;
+  email: string;
+  oab: string;
+  areas: string[];
+  ativo: boolean;
+};
+
 export type Compromisso = {
   id: string;
   titulo: string;
