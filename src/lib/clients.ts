@@ -1,6 +1,9 @@
 import type { Cliente } from '../data';
 import { supabase } from './supabase';
 
+/** Retorna apenas os dígitos para comparar CPF/CNPJ sem depender da máscara. */
+export const normalizeDocument = (value: string) => value.replace(/\D/g, '');
+
 type ClientRow = {
   id: string;
   name: string;

@@ -1,5 +1,5 @@
 import { AREAS } from '../data';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Check, Plus, Trash2 } from 'lucide-react';
 import { Button, Field, Input, Modal, Select, cx, useToast } from './ui';
@@ -22,7 +22,11 @@ export function NovoProcessoModal({
 }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const { refreshWorkspace, user } = useStore();
+  const { refreshWorkspace, user, advogados } = useStore();
+  const advogadosAtivos = useMemo(
+    () => advogados.filter((advogado) => advogado.perfil === 'Advogado' && advogado.ativo),
+    [advogados],
+  );
 
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [loadingClients, setLoadingClients] = useState(false);
@@ -38,6 +42,7 @@ export function NovoProcessoModal({
   const [vara, setVara] = useState('1ª Vara Cível');
   const [resumo, setResumo] = useState('');
   const [responsavel, setResponsavel] = useState('');
+  const [responsavelMode, setResponsavelMode] = useState<'equipe' | 'manual'>('equipe');
   const [partes, setPartes] = useState<{ id: string; nome: string; papel: string }[]>([
     { id: crypto.randomUUID(), nome: '', papel: 'Autor' },
   ]);
@@ -63,6 +68,9 @@ export function NovoProcessoModal({
           setClients(options);
           setClienteId((current) => fixedClienteId ?? (current || options[0]?.id || ''));
           setResponsavel((current) => current || label);
+          setResponsavelMode((current) => current === 'manual'
+            ? current
+            : advogadosAtivos.some((advogado) => advogado.nome === label) ? 'equipe' : 'manual');
         }
       } catch {
         if (active) setClientError(true);
@@ -72,12 +80,14 @@ export function NovoProcessoModal({
     }
     void loadOptions();
     return () => { active = false; };
-  }, [open, fixedClienteId]);
+  }, [open, fixedClienteId, advogadosAtivos]);
 
   const reset = () => {
     setStep(0);
     setNumero('');
     setArea('Direito Civil');
+    setResponsavel('');
+    setResponsavelMode('equipe');
     setResumo('');
     setPartes([{ id: crypto.randomUUID(), nome: '', papel: 'Autor' }]);
     setFormError('');
@@ -238,8 +248,38 @@ export function NovoProcessoModal({
       </div>
 
       <div hidden={step !== 1}>
-        <Field label="Advogado responsável" htmlFor="np-resp" hint="Atribua quem conduzirá o processo.">
-          <Input id="np-resp" value={responsavel} onChange={(e) => setResponsavel(e.target.value)} />
+        <Field label="Advogado responsável" htmlFor="np-resp" hint="Selecione um advogado ativo da conta ou informe outro nome.">
+          <div className="flex flex-col gap-2">
+            <Select
+              id="np-resp"
+              className="h-10 w-full"
+              value={responsavelMode === 'manual' ? '__manual__' : responsavel}
+              onChange={(e) => {
+                if (e.target.value === '__manual__') setResponsavelMode('manual');
+                else {
+                  setResponsavelMode('equipe');
+                  setResponsavel(e.target.value);
+                }
+              }}
+            >
+              <option value="" disabled>Selecione um advogado…</option>
+              {advogadosAtivos.map((advogado) => (
+                <option key={advogado.id} value={advogado.nome}>{advogado.nome}{advogado.oab ? ` · ${advogado.oab}` : ''}</option>
+              ))}
+              <option value="__manual__">Informar outro advogado manualmente</option>
+            </Select>
+            {responsavelMode === 'manual' && (
+              <Input
+                id="np-resp-manual"
+                value={responsavel}
+                onChange={(e) => setResponsavel(e.target.value)}
+                placeholder="Nome do advogado responsável"
+              />
+            )}
+            {advogadosAtivos.length <= 1 && (
+              <p className="text-[12px] text-muted">A conta ainda não disponibiliza a equipa de advogados de outros logins do escritório.</p>
+            )}
+          </div>
         </Field>
       </div>
 

@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Users } from 'lucide-react';
 import {
   Button,
@@ -17,6 +17,7 @@ import { AREAS, type Cliente } from '../data';
 import { useStore } from '../store';
 import { supabase } from '../lib/supabase';
 import { consultaCpf } from '../lib/consultaCpf';
+import { normalizeDocument } from '../lib/clients';
 
 const PER_PAGE = 6;
 
@@ -250,6 +251,22 @@ export function Clientes() {
             return false;
           }
 
+          const documentoNormalizado = normalizeDocument(cliente.documento);
+          if (documentoNormalizado) {
+            const { data: existentes, error: consultaError } = await supabase
+              .from('clients')
+              .select('document')
+              .eq('owner_id', userId);
+            if (consultaError) {
+              toast({ tone: 'error', message: 'Não foi possível verificar se o CPF/CNPJ já está cadastrado.' });
+              return false;
+            }
+            if ((existentes ?? []).some((row) => normalizeDocument(row.document) === documentoNormalizado)) {
+              toast({ tone: 'error', message: 'Já existe um cliente com este CPF/CNPJ na sua conta.' });
+              return false;
+            }
+          }
+
           const { data, error } = await supabase
             .from('clients')
             .insert({
@@ -262,12 +279,14 @@ export function Clientes() {
             .select('id, name, type, document, status, updated_at')
             .single();
           if (error || !data) {
-            toast({ tone: 'error', message: 'Não foi possível salvar o cliente. Tente novamente.' });
+            toast({ tone: 'error', message: error?.code === '23505'
+              ? 'Já existe um cliente com este CPF/CNPJ na sua conta.'
+              : 'Não foi possível salvar o cliente. Tente novamente.' });
             return false;
           }
 
           const next = toCliente(data as ClientRow);
-          setClientes((current) => [next, ...current]);
+          setClientes((current) => current.some((item) => item.id === next.id) ? current : [next, ...current]);
           void refreshWorkspace(user.id).catch(() => toast({ tone: 'error', message: 'Cliente salvo, mas os dados da conta não puderam ser atualizados. Atualize a página.' }));
           setModalOpen(false);
           toast({ tone: 'success', message: `Cliente "${cliente.nome}" cadastrado.` });
@@ -294,6 +313,8 @@ export function NovoClienteModal({
   const [consulting, setConsulting] = useState(false);
   const [lookupMessage, setLookupMessage] = useState('');
   const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
+  const submissionLock = useRef(false);
 
   useEffect(() => {
     if (!open) {
@@ -332,33 +353,42 @@ export function NovoClienteModal({
     }
   };
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (submissionLock.current) return;
     if (!nome.trim()) {
       setErr('Informe o nome do cliente.');
       return;
     }
-    void onSave({ nome: nome.trim(), tipo, documento: documento.trim() || '-' }).then((saved) => {
+    submissionLock.current = true;
+    setSaving(true);
+    try {
+      const saved = await onSave({ nome: nome.trim(), tipo, documento: documento.trim() || '-' });
       if (!saved) return;
       setNome('');
       setDocumento('');
       setBirthDate('');
       setErr('');
       setLookupMessage('');
-    }).catch(() => setErr('Não foi possível salvar o cliente. Tente novamente.'));
+    } catch {
+      setErr('Não foi possível salvar o cliente. Tente novamente.');
+    } finally {
+      submissionLock.current = false;
+      setSaving(false);
+    }
   };
 
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!saving) onClose(); }}
       title="Novo cliente"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" disabled={saving} onClick={onClose}>
             Cancelar
           </Button>
-          <Button type="submit" form="form-novo-cliente">
+          <Button type="submit" form="form-novo-cliente" loading={saving}>
             Salvar cliente
           </Button>
         </>

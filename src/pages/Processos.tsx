@@ -93,11 +93,29 @@ export function Processos() {
           <h1 className="text-[28px] font-semibold text-ink">Processos</h1>
           <p className="mt-1 text-muted">Acompanhe o andamento de todos os seus processos.</p>
         </div>
-        {can('cadastrarProcesso') && (
-          <Button icon={<Plus size={16} />} onClick={() => setNovoOpen(true)}>
-            Novo processo
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            aria-label="Selecionar processo para abrir"
+            className="h-9.5 min-w-[220px]"
+            value=""
+            disabled={loading || allProcessos.length === 0}
+            onChange={(e) => {
+              if (e.target.value) navigate(`/processos/${encodeURIComponent(e.target.value)}`);
+            }}
+          >
+            <option value="">Selecionar processo…</option>
+            {allProcessos.map((processo) => (
+              <option key={processo.numero} value={processo.numero}>
+                {processo.numero} · {processo.cliente}
+              </option>
+            ))}
+          </Select>
+          {can('cadastrarProcesso') && (
+            <Button icon={<Plus size={16} />} onClick={() => setNovoOpen(true)}>
+              Novo processo
+            </Button>
+          )}
+        </div>
       </header>
 
       <Card>

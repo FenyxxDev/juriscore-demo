@@ -298,8 +298,13 @@ export function ProcessoDetalhe() {
 
 function EditarProcesso({ proc, onClose, onSaved }: { proc: Proc; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
+  const { advogados } = useStore();
+  const advogadosAtivos = advogados.filter((advogado) => advogado.perfil === 'Advogado' && advogado.ativo);
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState({ responsavel: proc.responsavel, area: proc.area, tribunal: proc.tribunal, comarca: proc.comarca, vara: proc.vara, resumo: proc.resumo, observacoes: proc.observacoes ?? '' });
+  const [responsavelMode, setResponsavelMode] = useState<'equipe' | 'manual'>(() =>
+    advogadosAtivos.some((advogado) => advogado.nome === proc.responsavel) ? 'equipe' : 'manual',
+  );
   const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }));
   const save = async () => {
     setSaving(true);
@@ -328,8 +333,38 @@ function EditarProcesso({ proc, onClose, onSaved }: { proc: Proc; onClose: () =>
       }
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Responsável" htmlFor="ep-r">
-          <Input id="ep-r" value={f.responsavel} onChange={(e) => set('responsavel', e.target.value)} />
+        <Field label="Advogado responsável" htmlFor="ep-r" hint="Selecione um advogado ativo da conta ou informe outro nome.">
+          <div className="flex flex-col gap-2">
+            <Select
+              id="ep-r"
+              className="h-10 w-full"
+              value={responsavelMode === 'manual' ? '__manual__' : f.responsavel}
+              onChange={(e) => {
+                if (e.target.value === '__manual__') setResponsavelMode('manual');
+                else {
+                  setResponsavelMode('equipe');
+                  set('responsavel', e.target.value);
+                }
+              }}
+            >
+              <option value="" disabled>Selecione um advogado…</option>
+              {advogadosAtivos.map((advogado) => (
+                <option key={advogado.id} value={advogado.nome}>{advogado.nome}{advogado.oab ? ` · ${advogado.oab}` : ''}</option>
+              ))}
+              <option value="__manual__">Informar outro advogado manualmente</option>
+            </Select>
+            {responsavelMode === 'manual' && (
+              <Input
+                id="ep-r-manual"
+                value={f.responsavel}
+                onChange={(e) => set('responsavel', e.target.value)}
+                placeholder="Nome do advogado responsável"
+              />
+            )}
+            {advogadosAtivos.length <= 1 && (
+              <p className="text-[12px] text-muted">A conta ainda não disponibiliza a equipa de advogados de outros logins do escritório.</p>
+            )}
+          </div>
         </Field>
         <Field label="Área jurídica" htmlFor="ep-a">
           <Select id="ep-a" value={f.area} onChange={(e) => set('area', e.target.value)}>{AREAS.map((a) => <option key={a}>{a}</option>)}</Select>
