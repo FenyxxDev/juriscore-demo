@@ -28,12 +28,29 @@ export function AIWorking({ label = 'Analisando registros locais…' }: { label?
   );
 }
 
+export function GeminiAnswer({ answer, at }: { answer: string; at: string }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-line bg-white">
+      <div className="flex items-center justify-between border-b border-line px-3.5 py-2">
+        <span className="eyebrow flex items-center gap-1.5 text-[var(--color-teal)]"><Sparkles size={11} /> Resposta do Gemini</span>
+        <span className="text-[10.5px] text-[var(--color-faint)]">{at}</span>
+      </div>
+      <div className="px-3.5 py-3">
+        <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{answer}</p>
+        <p className="mt-3 border-t border-line pt-2 text-[10.5px] leading-relaxed text-[var(--color-faint)]">
+          Resposta gerada por IA. Confira as leis e fontes oficiais; não constitui parecer jurídico.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /** Falha técnica: nunca apresentada como "nenhum resultado". */
-export function AIFailed({ retry, manual }: { retry: () => void; manual?: string }) {
+export function AIFailed({ retry, manual, mode = 'local', message }: { retry: () => void; manual?: string; mode?: 'local' | 'gemini'; message?: string }) {
   return (
     <div className="rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/6 px-3.5 py-3 text-[13px]">
-      <p className="font-medium text-[var(--color-danger)]">Não foi possível concluir a análise local neste momento.</p>
-      <p className="mt-0.5 text-muted">Isso não significa que não existam registros.</p>
+      <p className="font-medium text-[var(--color-danger)]">{mode === 'gemini' ? 'Não foi possível consultar o Gemini neste momento.' : 'Não foi possível concluir a análise local neste momento.'}</p>
+      <p className="mt-0.5 text-muted">{message ?? (mode === 'gemini' ? 'Verifique a conexão ou aguarde alguns instantes antes de tentar novamente.' : 'Isso não significa que não existam registros.')}</p>
       <div className="mt-2 flex gap-4">
         <button onClick={retry} className="inline-flex items-center gap-1.5 font-medium text-[var(--color-teal)] hover:underline"><RotateCw size={13} /> Tentar novamente</button>
         {manual && <Link to={manual} className="font-medium text-muted hover:text-ink hover:underline">Consultar os registros manualmente</Link>}
