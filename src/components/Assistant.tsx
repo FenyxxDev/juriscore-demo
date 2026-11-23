@@ -9,10 +9,11 @@ import {
 } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import { ArrowRight, Sparkles, X } from 'lucide-react';
-import { cx } from './ui';
+import { Modal, cx } from './ui';
 import { type AIResult, useAI } from '../ai';
+import type { Processo } from '../data';
 import { useStore } from '../store';
-import { askGemini } from '../lib/gemini';
+import { askGemini, type GeminiContext } from '../lib/gemini';
 import { AIFailed, AIResultView, AIWorking, GeminiAnswer } from './AIResult';
 
 const AssistantCtx = createContext<{ open: (seed?: string) => void; ask: (q: string) => void }>({ open: () => {}, ask: () => {} });
@@ -26,6 +27,94 @@ type Answered =
 type Working = { from: 'working'; mode: AssistantMode };
 type Failed = { from: 'error'; mode: AssistantMode; retry: () => void; message?: string };
 type Msg = Pending | Answered | Working | Failed;
+type GeminiSelections = {
+  basics: boolean;
+  identity: boolean;
+  internalNotes: boolean;
+  movements: boolean;
+  deadlines: boolean;
+  hearings: boolean;
+  parties: boolean;
+  documents: string[];
+};
+type GeminiReview = { question: string; process?: Processo };
+const DEFAULT_GEMINI_SELECTIONS: GeminiSelections = {
+  basics: true,
+  identity: false,
+  internalNotes: false,
+  movements: true,
+  deadlines: true,
+  hearings: true,
+  parties: false,
+  documents: [],
+};
+
+function buildGeminiContext(process: Processo | undefined, selections: GeminiSelections): GeminiContext | undefined {
+  if (!process) return undefined;
+  const context: GeminiContext = {};
+  const processData: NonNullable<GeminiContext['process']> = {};
+  if (selections.identity) {
+    processData.number = process.numero;
+    processData.clientName = process.cliente;
+  }
+  if (selections.basics) {
+    processData.area = process.area;
+    processData.status = process.status;
+    processData.tribunal = process.tribunal;
+    processData.comarca = process.comarca;
+    processData.vara = process.vara;
+    processData.summary = process.resumo.slice(0, 6_000);
+  }
+  if (selections.internalNotes && process.observacoes) processData.internalNotes = process.observacoes.slice(0, 6_000);
+  if (Object.keys(processData).length) context.process = processData;
+  if (selections.movements) {
+    context.movements = process.movimentacoes.slice(0, 20).map((movement) => ({
+      date: movement.data,
+      type: movement.tipo,
+      description: movement.descricao.slice(0, 1_000),
+    }));
+  }
+  if (selections.deadlines) {
+    context.deadlines = process.prazos.slice(0, 20).map((deadline) => ({
+      description: deadline.descricao,
+      date: deadline.data,
+      status: deadline.status,
+      priority: deadline.prioridade,
+    }));
+  }
+  if (selections.hearings) {
+    context.hearings = process.audiencias.slice(0, 15).map((hearing) => ({
+      type: hearing.tipo,
+      date: hearing.data,
+      status: hearing.status,
+      modality: hearing.modalidade,
+      location: hearing.local,
+    }));
+  }
+  if (selections.parties) {
+    context.parties = process.partes.slice(0, 15).map((party) => ({
+      name: party.nome,
+      role: party.papel,
+      representative: party.rep,
+    }));
+  }
+  if (selections.documents.length) {
+    context.documents = process.documentos
+      .filter((document) => selections.documents.includes(document.id) && !!document.conteudo?.trim())
+      .slice(0, 3)
+      .map((document) => {
+        const content = document.conteudo!.slice(0, 6_000);
+        return {
+          name: document.nome,
+          type: document.tipo,
+          date: document.data,
+          content,
+          ...(document.conteudo!.length > content.length ? { truncated: true } : {}),
+        };
+      });
+  }
+  return Object.keys(context).length ? context : undefined;
+}
 
 const stamp = () =>
   new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -101,6 +190,8 @@ function AssistantWidget({
   const [input, setInput] = useState('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
+  const [geminiReview, setGeminiReview] = useState<GeminiReview>();
+  const [geminiSelections, setGeminiSelections] = useState<GeminiSelections>(DEFAULT_GEMINI_SELECTIONS);
   const bodyRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -109,29 +200,15 @@ function AssistantWidget({
   const ask = (question: string, numero?: string, selectedMode: AssistantMode = mode) => {
     const q = question.trim();
     if (!q || busy) return;
+    if (selectedMode === 'gemini') {
+      setGeminiSelections({ ...DEFAULT_GEMINI_SELECTIONS, documents: [] });
+      setGeminiReview({ question: q, process: (numero ? processos.find((p) => p.numero === numero) : undefined) ?? proc });
+      return;
+    }
     setBusy(true);
     setInput('');
     setMsgs((m) => [...m.filter((x) => x.from !== 'error'), { from: 'user', text: q }, { from: 'working', mode: selectedMode }]);
     scrollDown();
-    if (selectedMode === 'gemini') {
-      void askGemini(q)
-        .then((answer) => {
-          setMsgs((m) => [...m.filter((x) => x.from !== 'working'), { from: 'ia', mode: 'gemini', answer, at: stamp() }]);
-        })
-        .catch((error: unknown) => {
-          setMsgs((m) => [...m.filter((x) => x.from !== 'working'), {
-            from: 'error',
-            mode: selectedMode,
-            message: error instanceof Error ? error.message : 'Não foi possível consultar o Gemini. Tente novamente.',
-            retry: () => ask(q, numero, selectedMode),
-          }]);
-        })
-        .finally(() => {
-          setBusy(false);
-          scrollDown();
-        });
-      return;
-    }
     timer.current = setTimeout(() => {
       try {
         const result = ai.answer({ scope: numero ? 'processo' : ctx.scope, numero: numero ?? ctx.numero }, q);
@@ -146,9 +223,48 @@ function AssistantWidget({
     }, 650);
   };
 
+  const confirmGeminiSend = () => {
+    if (!geminiReview || busy) return;
+    const { question, process } = geminiReview;
+    const context = buildGeminiContext(process, geminiSelections);
+    setGeminiReview(undefined);
+    setInput('');
+    setBusy(true);
+    setMsgs((m) => [...m.filter((x) => x.from !== 'error'), { from: 'user', text: question }, { from: 'working', mode: 'gemini' }]);
+    scrollDown();
+    void askGemini(question, context)
+      .then((answer) => {
+        setMsgs((m) => [...m.filter((x) => x.from !== 'working'), { from: 'ia', mode: 'gemini', answer, at: stamp() }]);
+      })
+      .catch((error: unknown) => {
+        setMsgs((m) => [...m.filter((x) => x.from !== 'working'), {
+          from: 'error',
+          mode: 'gemini',
+          message: error instanceof Error ? error.message : 'Não foi possível consultar o Gemini. Tente novamente.',
+          retry: () => ask(question, undefined, 'gemini'),
+        }]);
+      })
+      .finally(() => {
+        setBusy(false);
+        scrollDown();
+      });
+  };
+
+  const closeGeminiReview = () => {
+    if (geminiReview) setInput(geminiReview.question);
+    setGeminiReview(undefined);
+  };
+
   const suggestions = mode === 'local'
     ? ctx.suggestions
-    : ['Explique um conceito jurídico em termos gerais.', 'Sugira uma estrutura para uma peça jurídica sem usar dados reais.', 'Como melhorar a clareza deste texto?'];
+    : ctx.scope === 'processo'
+      ? ['Resuma este processo.', 'Analise as movimentações deste processo.', 'Quais prazos e audiências merecem atenção?', 'Resuma um documento selecionado.']
+      : ['Explique um conceito jurídico brasileiro.', 'Sugira uma estrutura genérica para uma peça jurídica.', 'Como melhorar a clareza deste texto jurídico?'];
+  const reviewContext = geminiReview ? buildGeminiContext(geminiReview.process, geminiSelections) : undefined;
+  const reviewPayload = geminiReview
+    ? JSON.stringify({ question: geminiReview.question, ...(reviewContext ? { context: reviewContext } : {}) }, null, 2)
+    : '';
+  const availableDocuments = geminiReview?.process?.documentos.filter((document) => !!document.conteudo?.trim()) ?? [];
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -212,7 +328,7 @@ function AssistantWidget({
                   <span className={cx('h-1.5 w-1.5 rounded-full', mode === 'gemini' ? 'bg-[var(--color-teal)]' : prefs.iaAtiva ? 'bg-[var(--color-success)]' : 'bg-slate-500')} /> {mode === 'gemini' ? 'Gemini sob demanda' : prefs.iaAtiva ? 'Regras locais ativas' : 'Desativada'}
                 </span>
                 <span className="mx-1.5 text-slate-600">·</span>
-                {mode === 'gemini' ? 'Somente a pergunta atual vai ao Google' : 'Somente registros desta conta'}
+                {mode === 'gemini' ? 'Envio ao Google só após sua confirmação' : 'Somente registros desta conta'}
               </p>
             </div>
             <button onClick={() => setIsOpen(false)} aria-label="Fechar assistente" className="rounded-md p-1.5 text-slate-400 hover:bg-white/10 hover:text-white">
@@ -225,7 +341,7 @@ function AssistantWidget({
             <div className="rounded-md border border-line bg-white px-3.5 py-2.5">
               <p className="eyebrow mb-1.5">{mode === 'gemini' ? 'Privacidade do contexto' : 'Contexto atual'}</p>
               {mode === 'gemini' ? (
-                <p className="text-[12.5px] text-ink">A tela, os registros do JurisCore e o histórico do chat não são anexados à pergunta enviada ao Gemini.</p>
+                <p className="text-[12.5px] text-ink">Você revisa e confirma cada envio. Só a pergunta e as seções que selecionar serão enviadas; o histórico e outros processos ficam de fora.</p>
               ) : proc ? (
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[12.5px]">
                   <dt className="text-muted">Processo</dt>
@@ -249,12 +365,12 @@ function AssistantWidget({
             </div>
             {mode === 'gemini' && (
               <div className="rounded-md border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5 px-3 py-2.5 text-[11.5px] leading-relaxed text-ink">
-                <strong>Antes de enviar:</strong> somente a pergunta digitada será enviada ao Google. A conta do AI Studio está no nível gratuito; nesse nível, o Google pode usar o conteúdo enviado para melhorar seus produtos. Não inclua nomes, números de processo, dados pessoais, documentos ou informações sigilosas.
+                <strong>Antes de enviar:</strong> cada pergunta exige uma confirmação. Você escolhe as seções do processo e confere a prévia exata. No nível gratuito atual do AI Studio, o Google pode usar o conteúdo enviado para melhorar produtos; evite incluir identificadores ou dados sigilosos quando não forem necessários.
               </div>
             )}
             {msgs.length === 0 && (
               <p className="px-1 text-[12.5px] leading-relaxed text-muted">
-                {mode === 'gemini' ? 'Faça uma pergunta geral. O Gemini não recebe os dados desta tela.' : 'Escolha uma sugestão abaixo ou faça uma pergunta sobre os registros desta tela.'}
+                {mode === 'gemini' ? 'Pergunte sobre Direito brasileiro, o JurisCore ou o processo atual. Antes de cada envio, você escolhe o contexto e confirma o que será compartilhado.' : 'Escolha uma sugestão abaixo ou faça uma pergunta sobre os registros desta tela.'}
               </p>
             )}
 
@@ -309,12 +425,67 @@ function AssistantWidget({
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-faint)]">
               {mode === 'gemini'
-                ? 'Apenas a mensagem atual é enviada ao Google; nenhum registro, documento ou histórico é enviado. No nível gratuito, o conteúdo pode ser usado pelo Google para melhorar produtos. Resposta de IA: confira as fontes oficiais; não constitui parecer jurídico.'
+                ? 'A pergunta só vai ao Google após sua confirmação. Você decide quais dados do processo incluir. No nível gratuito, o conteúdo pode ser usado para melhorar produtos. Resposta de IA: confira as fontes oficiais; não constitui parecer jurídico.'
                 : 'Regras locais sobre registros desta conta. Não usa modelo generativo nem envia dados a serviço externo. Não constitui parecer jurídico.'}
             </p>
           </form>
         </aside>
       </div>
+
+      <Modal
+        open={!!geminiReview}
+        onClose={closeGeminiReview}
+        title="Revise antes de enviar ao Gemini"
+        description="Nada será enviado até você confirmar. Revise a pergunta e selecione apenas o contexto necessário."
+        size="lg"
+        footer={(
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" onClick={closeGeminiReview} className="rounded-md border border-line-strong px-3.5 py-2 text-[13px] font-medium text-muted hover:bg-subtle">Cancelar</button>
+            <button type="button" onClick={confirmGeminiSend} disabled={busy} className="rounded-md bg-[var(--color-teal)] px-3.5 py-2 text-[13px] font-medium text-white hover:bg-[var(--color-teal-hover)] disabled:opacity-50">
+              Confirmar envio {reviewContext ? 'do contexto ao Google' : 'da pergunta ao Google'}
+            </button>
+          </div>
+        )}
+      >
+        {geminiReview && (
+          <div className="space-y-3 text-[13px]">
+            <div className="rounded-md border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5 p-3 leading-relaxed text-ink">
+              O Google receberá a pergunta e as seções mostradas na prévia; o servidor também aplica as instruções fixas de escopo do assistente. A chave atual usa o nível gratuito do AI Studio, no qual o conteúdo enviado pode ser usado para melhorar produtos. Não inclua dados sigilosos sem necessidade.
+            </div>
+            {geminiReview.process ? (
+              <fieldset className="space-y-2 rounded-md border border-line p-3">
+                <legend className="px-1 text-[12px] font-semibold text-ink">Dados do processo atual</legend>
+                <label className="flex gap-2"><input type="checkbox" checked={geminiSelections.basics} onChange={(e) => setGeminiSelections((s) => ({ ...s, basics: e.target.checked }))} /> <span>Área, situação, tribunal, comarca, vara e resumo cadastrado</span></label>
+                <label className="flex gap-2"><input type="checkbox" checked={geminiSelections.movements} onChange={(e) => setGeminiSelections((s) => ({ ...s, movements: e.target.checked }))} /> <span>Até 20 movimentações disponíveis, com data, tipo e descrição</span></label>
+                <label className="flex gap-2"><input type="checkbox" checked={geminiSelections.deadlines} onChange={(e) => setGeminiSelections((s) => ({ ...s, deadlines: e.target.checked }))} /> <span>Até 20 prazos, com descrição, data, situação e prioridade</span></label>
+                <label className="flex gap-2"><input type="checkbox" checked={geminiSelections.hearings} onChange={(e) => setGeminiSelections((s) => ({ ...s, hearings: e.target.checked }))} /> <span>Até 15 audiências, com tipo, data, situação, modalidade e local</span></label>
+                <label className="flex gap-2"><input type="checkbox" checked={geminiSelections.identity} onChange={(e) => setGeminiSelections((s) => ({ ...s, identity: e.target.checked }))} /> <span>Número do processo e nome do cliente (desativado por padrão)</span></label>
+                <label className="flex gap-2"><input type="checkbox" checked={geminiSelections.internalNotes} onChange={(e) => setGeminiSelections((s) => ({ ...s, internalNotes: e.target.checked }))} /> <span>Observações internas do processo (desativado por padrão)</span></label>
+                <label className="flex gap-2"><input type="checkbox" checked={geminiSelections.parties} onChange={(e) => setGeminiSelections((s) => ({ ...s, parties: e.target.checked }))} /> <span>Nomes, papéis e representantes das partes; documentos pessoais são sempre excluídos</span></label>
+                {availableDocuments.length > 0 ? (
+                  <div className="border-t border-line pt-2">
+                    <p className="mb-1.5 font-medium text-ink">Documentos com texto extraído (até 3 arquivos)</p>
+                    {availableDocuments.map((document) => (
+                      <label key={document.id} className="mb-1 flex gap-2">
+                        <input type="checkbox" checked={geminiSelections.documents.includes(document.id)} disabled={!geminiSelections.documents.includes(document.id) && geminiSelections.documents.length >= 3} onChange={(e) => setGeminiSelections((s) => ({ ...s, documents: e.target.checked ? [...s.documents, document.id] : s.documents.filter((id) => id !== document.id) }))} />
+                        <span>{document.nome} · {document.tipo} · até 6.000 caracteres</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="border-t border-line pt-2 text-[12px] text-muted">Os anexos deste processo estão disponíveis apenas como arquivos/metadados; nenhum conteúdo de documento será enviado. Arquivos sem texto extraído não podem ser resumidos pelo Gemini nesta etapa.</p>
+                )}
+              </fieldset>
+            ) : (
+              <p className="rounded-md border border-line bg-subtle p-3 text-muted">Nenhum processo específico está selecionado. O Gemini receberá somente a pergunta, a menos que você navegue até um processo e faça uma nova solicitação.</p>
+            )}
+            <details className="rounded-md border border-line" open>
+              <summary className="cursor-pointer px-3 py-2 font-medium text-ink">Prévia da pergunta e do contexto selecionado</summary>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-line bg-subtle p-3 text-[11px] leading-relaxed text-ink">{reviewPayload}</pre>
+            </details>
+          </div>
+        )}
+      </Modal>
     </>
   );
 }

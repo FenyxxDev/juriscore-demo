@@ -5,6 +5,25 @@ type GeminiResponse = {
   error?: unknown;
 };
 
+export type GeminiContext = {
+  process?: {
+    number?: string;
+    clientName?: string;
+    area?: string;
+    status?: string;
+    tribunal?: string;
+    comarca?: string;
+    vara?: string;
+    summary?: string;
+    internalNotes?: string;
+  };
+  movements?: Array<{ date: string; type: string; description: string }>;
+  deadlines?: Array<{ description: string; date: string; status: string; priority: string }>;
+  hearings?: Array<{ type: string; date: string; status: string; modality: string; location: string }>;
+  parties?: Array<{ name: string; role: string; representative: string }>;
+  documents?: Array<{ name: string; type: string; date: string; content: string; truncated?: boolean }>;
+};
+
 const ERROR_MESSAGES: Record<string, string> = {
   not_configured: 'O Gemini ainda não está configurado no servidor.',
   rate_limited: 'O limite temporário do Gemini foi atingido. Aguarde um pouco e tente novamente.',
@@ -13,16 +32,18 @@ const ERROR_MESSAGES: Record<string, string> = {
   provider_rejected_request: 'O Gemini não aceitou esta solicitação. Revise a pergunta e tente novamente.',
   empty_response: 'O Gemini não retornou uma resposta utilizável. Tente novamente.',
   question_too_long: 'A pergunta ultrapassa o limite de 4.000 caracteres.',
+  invalid_context: 'Não foi possível validar o contexto selecionado. Revise as seções e tente novamente.',
+  context_too_large: 'O conteúdo selecionado é muito extenso. Reduza as seções ou documentos e tente novamente.',
   question_required: 'Digite uma pergunta antes de enviar.',
 };
 
-export async function askGemini(question: string): Promise<string> {
+export async function askGemini(question: string, context?: GeminiContext): Promise<string> {
   if (!supabase) {
     throw new Error('O serviço de autenticação não está configurado.');
   }
 
   const { data, error } = await supabase.functions.invoke<GeminiResponse>('assistant-gemini', {
-    body: { question },
+    body: { question, ...(context ? { context } : {}) },
   });
 
   if (error) {
