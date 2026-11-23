@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
-import { ArrowLeft, ArrowRight, Mail, Scale, ShieldCheck, UsersRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail, Scale, UsersRound } from 'lucide-react';
 import { Button, Field, Input, Modal, Select, cx, useToast } from '../components/ui';
 import { AreaPicker } from '../components/Areas';
 import { AuthShell, EMAIL_RE, PasswordInput } from './Login';
@@ -8,8 +8,9 @@ import { type Advogado, type Perfil, UFS, rel } from '../data';
 import { uid, useStore } from '../store';
 import { supabase } from '../lib/supabase';
 
-const PERFIL_OPCOES: { id: Perfil; label: string; desc: string; Icon: typeof Scale }[] = [
-  { id: 'Administrador', label: 'Administrador', desc: 'Solicitação de acesso administrativo sujeita à aprovação.', Icon: ShieldCheck },
+type PerfilCadastro = Exclude<Perfil, 'Administrador'>;
+
+const PERFIL_OPCOES: { id: PerfilCadastro; label: string; desc: string; Icon: typeof Scale }[] = [
   { id: 'Advogado', label: 'Advogado', desc: 'Acesso padrão para atuação jurídica no escritório.', Icon: Scale },
   { id: 'Assistente', label: 'Assistente', desc: 'Solicitação de acesso de assistente sujeita à aprovação.', Icon: UsersRound },
 ];
@@ -60,9 +61,9 @@ export function Cadastro() {
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [f, setF] = useState({
     nome: '', email: '', telefone: '', senha: '', confirmar: '',
-    perfil: 'Advogado' as Perfil | '',
+    perfil: 'Advogado' as PerfilCadastro | '',
     oab: '', oabUf: 'PE', especialidade: '', anos: '', areas: [] as string[],
-    equipe: '', cargo: '', escritorio: '',
+    equipe: '',
   });
   const set = (k: keyof typeof f) => (v: string | string[]) => {
     setF((x) => ({ ...x, [k]: v }));
@@ -100,10 +101,6 @@ export function Cadastro() {
         if (!f.areas.length) e.areas = 'Selecione ao menos uma área acompanhada.';
         if (!f.equipe) e.equipe = req;
       }
-      if (f.perfil === 'Administrador') {
-        if (!f.cargo.trim()) e.cargo = req;
-        if (!f.escritorio.trim()) e.escritorio = req;
-      }
     }
     setErrs(e);
     return Object.keys(e).length === 0;
@@ -118,7 +115,7 @@ export function Cadastro() {
       return;
     }
     setLoading(true);
-    const perfil = f.perfil as Perfil;
+    const perfil = f.perfil as PerfilCadastro;
     const oabNum = f.oab.replace(/\D/g, '');
     const telefone = f.telefone.trim();
     const telefoneNumeros = telefone.replace(/\D/g, '');
@@ -134,10 +131,8 @@ export function Cadastro() {
       oabUf: perfil === 'Advogado' ? f.oabUf : undefined,
       especialidade: perfil === 'Advogado' ? f.especialidade.trim() : undefined,
       anosExperiencia: perfil === 'Advogado' && f.anos ? Number(f.anos) : undefined,
-      areas: perfil === 'Administrador' ? [] : f.areas,
+      areas: f.areas,
       equipe: perfil === 'Assistente' ? f.equipe : undefined,
-      cargo: perfil === 'Administrador' ? f.cargo.trim() : undefined,
-      escritorio: perfil === 'Administrador' ? f.escritorio.trim() : undefined,
       ultimaAtividade: rel(0),
     };
 
@@ -159,8 +154,6 @@ export function Cadastro() {
           anosExperiencia: usuario.anosExperiencia,
           areas: usuario.areas,
           equipe: usuario.equipe,
-          cargo: usuario.cargo,
-          escritorio: usuario.escritorio,
         },
       },
     });
@@ -269,7 +262,7 @@ export function Cadastro() {
               );
             })}
             {errs.perfil && <p className="text-[12.5px] text-[var(--color-danger)]">{errs.perfil}</p>}
-            <p className="mt-1 text-[12px] text-[var(--color-faint)]">A escolha registra apenas uma solicitação. Administrador e Assistente só recebem essas permissões após aprovação confiável.</p>
+            <p className="mt-1 text-[12px] text-[var(--color-faint)]">A solicitação de perfil de Assistente depende de aprovação confiável.</p>
           </div>
         )}
 
@@ -309,17 +302,6 @@ export function Cadastro() {
             </Field>
             <Field label="Áreas do escritório que acompanha" error={errs.areas} required>
               <AreaPicker value={f.areas} onChange={set('areas')} invalid={!!errs.areas} />
-            </Field>
-          </>
-        )}
-
-        {etapa === 2 && f.perfil === 'Administrador' && (
-          <>
-            <Field label="Cargo" htmlFor="c-cargo" error={errs.cargo} required>
-              <Input id="c-cargo" placeholder="Ex.: Sócio administrador" value={f.cargo} invalid={!!errs.cargo} onChange={(e) => set('cargo')(e.target.value)} autoFocus />
-            </Field>
-            <Field label="Escritório" htmlFor="c-esc" error={errs.escritorio} required>
-              <Input id="c-esc" placeholder="Razão social ou nome do escritório" value={f.escritorio} invalid={!!errs.escritorio} onChange={(e) => set('escritorio')(e.target.value)} />
             </Field>
           </>
         )}
