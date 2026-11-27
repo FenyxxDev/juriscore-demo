@@ -946,6 +946,8 @@ function AudienciasTab({ proc, item, onAdd }: { proc: Proc; item: string | null;
                     location: a.local,
                     startDate: a.data,
                     allDay: !a.data.includes('T') && !a.data.includes(':'),
+                    addGoogleMeet: a.modalidade === 'Online' || (a.local ?? '').toLowerCase().includes('google meet'),
+                    notificationMinutes: 30,
                   })}
                   target="_blank"
                   rel="noreferrer"
@@ -963,6 +965,8 @@ function AudienciasTab({ proc, item, onAdd }: { proc: Proc; item: string | null;
                         location: a.local,
                         startDate: a.data,
                         allDay: !a.data.includes('T') && !a.data.includes(':'),
+                        addGoogleMeet: a.modalidade === 'Online' || (a.local ?? '').toLowerCase().includes('google meet'),
+                        notificationMinutes: 30,
                       },
                       `audiencia-${a.id}.ics`,
                     )

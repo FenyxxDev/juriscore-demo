@@ -59,9 +59,11 @@ function Form({ onClose, fixo, tipoInicial, dataInicial }: { onClose: () => void
     responsavel: proc?.responsavel ?? user.nome,
     observacoes: '',
     prioridade: 'média' as Prioridade,
+    adicionarGoogleMeet: false,
+    notificacaoMinutos: 15,
   });
   const [err, setErr] = useState<Record<string, string>>({});
-  const set = (k: keyof typeof f, v: string) => setF((s) => ({ ...s, [k]: v }));
+  const set = (k: keyof typeof f, v: any) => setF((s) => ({ ...s, [k]: v }));
 
   async function salvar() {
     const e: Record<string, string> = {};
@@ -81,8 +83,17 @@ function Form({ onClose, fixo, tipoInicial, dataInicial }: { onClose: () => void
 
     setSaving(true);
     try {
+      let finalObs = f.observacoes;
+      if (f.adicionarGoogleMeet) {
+        finalObs = finalObs ? `${finalObs}\n[Videoconferência: Google Meet]` : '[Videoconferência: Google Meet]';
+      }
+      if (f.notificacaoMinutos) {
+        finalObs = finalObs ? `${finalObs}\n[Notificação: ${f.notificacaoMinutos} min antes]` : `[Notificação: ${f.notificacaoMinutos} min antes]`;
+      }
+      const finalLocal = f.adicionarGoogleMeet && !f.local.trim() ? 'Google Meet' : f.local.trim();
+
       if (tipo === 'audiencia') {
-        await createProcessHearing({ numero, tipo: f.tipoAud, data: f.data, hora: f.hora, modalidade: f.modalidade, local: f.local.trim(), participantes: f.participantes, responsavel: f.responsavel, observacoes: f.observacoes });
+        await createProcessHearing({ numero, tipo: f.tipoAud, data: f.data, hora: f.hora, modalidade: f.adicionarGoogleMeet ? 'Online' : f.modalidade, local: finalLocal, participantes: f.participantes, responsavel: f.responsavel, observacoes: finalObs });
         toast({ tone: 'success', message: 'Audiência agendada e salva no processo.' });
       } else if (tipo === 'prazo') {
         await createProcessDeadline(numero, { descricao: f.titulo.trim(), data: f.data, responsavel: f.responsavel, prioridade: f.prioridade });
@@ -91,7 +102,7 @@ function Form({ onClose, fixo, tipoInicial, dataInicial }: { onClose: () => void
         await createProcessTask({ numero, titulo: f.titulo.trim(), data: f.data, responsavel: f.responsavel, prioridade: f.prioridade });
         toast({ tone: 'success', message: `Tarefa atribuída a ${f.responsavel}.` });
       } else {
-        await createCalendarAppointment({ numero: numero || undefined, titulo: f.titulo.trim(), data: f.data, hora: f.hora || undefined, local: f.local.trim() || 'A definir', responsavel: f.responsavel, observacoes: f.observacoes });
+        await createCalendarAppointment({ numero: numero || undefined, titulo: f.titulo.trim(), data: f.data, hora: f.hora || undefined, local: finalLocal || 'A definir', responsavel: f.responsavel, observacoes: finalObs });
         toast({ tone: 'success', message: 'Compromisso salvo na agenda.' });
       }
       onClose();
@@ -171,9 +182,43 @@ function Form({ onClose, fixo, tipoInicial, dataInicial }: { onClose: () => void
             </Field>
           )}
           {(tipo === 'audiencia' || tipo === 'compromisso') && (
-            <Field label={f.modalidade === 'Online' && tipo === 'audiencia' ? 'Link da sala' : 'Local ou link'} htmlFor="ev-l" error={err.local} required={tipo === 'audiencia'}>
-              <Input id="ev-l" value={f.local} invalid={!!err.local} onChange={(e) => set('local', e.target.value)} placeholder={f.modalidade === 'Online' ? 'https://…' : 'Ex.: 3ª Vara Cível · Sala 2'} />
+            <Field label={f.modalidade === 'Online' && tipo === 'audiencia' ? 'Link da sala / Local' : 'Local ou endereço (Location)'} htmlFor="ev-l" error={err.local} required={tipo === 'audiencia' && !f.adicionarGoogleMeet}>
+              <Input id="ev-l" value={f.local} invalid={!!err.local} onChange={(e) => set('local', e.target.value)} placeholder={f.adicionarGoogleMeet ? 'Google Meet (automático)' : f.modalidade === 'Online' ? 'https://…' : 'Ex.: Fórum Central · Sala 3'} />
             </Field>
+          )}
+          {(tipo === 'audiencia' || tipo === 'compromisso') && (
+            <div className="flex flex-col gap-2 rounded-md border border-line p-3 sm:col-span-2 bg-slate-50/50">
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-ink">
+                <input
+                  type="checkbox"
+                  checked={f.adicionarGoogleMeet}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    set('adicionarGoogleMeet', checked);
+                    if (checked && tipo === 'audiencia') {
+                      set('modalidade', 'Online');
+                    }
+                  }}
+                  className="rounded border-line text-brand focus:ring-brand"
+                />
+                <span>Adicionar videoconferência do <strong>Google Meet</strong></span>
+              </label>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                <span>Notificação prévia:</span>
+                <select
+                  value={f.notificacaoMinutos}
+                  onChange={(e) => set('notificacaoMinutos', Number(e.target.value))}
+                  className="rounded border border-line bg-white px-2 py-1 text-xs text-ink"
+                >
+                  <option value={5}>5 minutos antes</option>
+                  <option value={10}>10 minutos antes</option>
+                  <option value={15}>15 minutos antes</option>
+                  <option value={30}>30 minutos antes</option>
+                  <option value={60}>1 hora antes</option>
+                  <option value={1440}>1 dia antes</option>
+                </select>
+              </div>
+            </div>
           )}
           {tipo === 'audiencia' && (
             <Field label="Participantes" htmlFor="ev-pa"><Input id="ev-pa" value={f.participantes} onChange={(e) => set('participantes', e.target.value)} placeholder="Cliente, testemunhas, preposto…" /></Field>

@@ -405,6 +405,8 @@ function ItemBody({ i, compact, onDone, onCancel, busy }: { i: Item; compact?: b
                 location: i.detalhe ?? '',
                 startDate: i.d,
                 allDay: !i.hora,
+                addGoogleMeet: (i.detalhe ?? '').toLowerCase().includes('google meet') || (i.detalhe ?? '').toLowerCase().includes('online'),
+                notificationMinutes: 15,
               })}
               target="_blank"
               rel="noreferrer"
@@ -422,6 +424,8 @@ function ItemBody({ i, compact, onDone, onCancel, busy }: { i: Item; compact?: b
                     location: i.detalhe ?? '',
                     startDate: i.d,
                     allDay: !i.hora,
+                    addGoogleMeet: (i.detalhe ?? '').toLowerCase().includes('google meet') || (i.detalhe ?? '').toLowerCase().includes('online'),
+                    notificationMinutes: 15,
                   },
                   `${i.kind}-${i.id}.ics`,
                 )

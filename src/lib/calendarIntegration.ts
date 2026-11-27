@@ -9,6 +9,8 @@ export type CalendarEventData = {
   startDate: Date | string;
   endDate?: Date | string;
   allDay?: boolean;
+  addGoogleMeet?: boolean;
+  notificationMinutes?: number; // Ex: 15, 30, 60 minutos antes
 };
 
 /**
@@ -55,11 +57,28 @@ export function buildGoogleCalendarUrl(event: CalendarEventData): string {
 
   const dates = `${start}/${end}`;
 
+  // Se addGoogleMeet for verdadeiro, insere link de videoconferência ou aviso na descrição e localização
+  let details = event.description ?? '';
+  let location = event.location ?? '';
+
+  if (event.addGoogleMeet) {
+    const meetNotice = 'Videoconferência: Google Meet (gerar sala ao salvar no Google Agenda: https://meet.google.com/new)';
+    details = details ? `${details}\n\n${meetNotice}` : meetNotice;
+    if (!location) {
+      location = 'Google Meet (https://meet.google.com/new)';
+    }
+  }
+
+  if (event.notificationMinutes) {
+    const notifNotice = `Lembrete configurado: ${event.notificationMinutes} minutos antes`;
+    details = details ? `${details}\n${notifNotice}` : notifNotice;
+  }
+
   const params = new URLSearchParams({
     text: event.title,
     dates,
-    details: event.description ?? '',
-    location: event.location ?? '',
+    details,
+    location,
   });
 
   return `${base}&${params.toString()}`;
@@ -77,6 +96,24 @@ export function downloadIcsFile(event: CalendarEventData, fileName = 'evento.ics
     ? formatGoogleDate(new Date(startObj.getTime() + 24 * 60 * 60 * 1000), true)
     : formatGoogleDate(new Date(startObj.getTime() + 60 * 60 * 1000), false);
 
+  let details = event.description ?? '';
+  let location = event.location ?? '';
+
+  if (event.addGoogleMeet) {
+    const meetNotice = 'Videoconferência: Google Meet';
+    details = details ? `${details}\n\n${meetNotice}` : meetNotice;
+    if (!location) location = 'Google Meet';
+  }
+
+  const notifMinutes = event.notificationMinutes ?? 15;
+  const alarmBlock = [
+    'BEGIN:VALARM',
+    `TRIGGER:-PT${notifMinutes}M`,
+    'ACTION:DISPLAY',
+    `DESCRIPTION:Lembrete: ${event.title.replace(/\n/g, ' ')}`,
+    'END:VALARM',
+  ].join('\r\n');
+
   const icsContent = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -89,9 +126,10 @@ export function downloadIcsFile(event: CalendarEventData, fileName = 'evento.ics
     `DTSTART:${start}`,
     `DTEND:${end}`,
     `SUMMARY:${event.title.replace(/\n/g, ' ')}`,
-    `DESCRIPTION:${(event.description ?? '').replace(/\n/g, '\\n')}`,
-    `LOCATION:${(event.location ?? '').replace(/\n/g, ' ')}`,
+    `DESCRIPTION:${details.replace(/\n/g, '\\n')}`,
+    `LOCATION:${location.replace(/\n/g, ' ')}`,
     'STATUS:CONFIRMED',
+    alarmBlock,
     'END:VEVENT',
     'END:VCALENDAR',
   ].join('\r\n');
