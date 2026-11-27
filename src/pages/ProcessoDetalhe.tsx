@@ -1,10 +1,12 @@
 import { type FormEvent, type ReactNode, Fragment, useEffect, useState } from 'react';
-import { Link, Navigate, useParams, useSearchParams } from 'react-router';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   Archive,
+  Calendar,
   CalendarPlus,
   CheckCircle2,
   Download,
+  ExternalLink,
   FileText,
   FileSearch,
   Lightbulb,
@@ -12,6 +14,7 @@ import {
   Plus,
   RotateCw,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import {
   Alert,
@@ -34,9 +37,10 @@ import { AIFailed, AIResultView, AIWorking } from '../components/AIResult';
 import { AreaTag } from '../components/Areas';
 import { NovoEventoModal } from '../components/NovoEventoModal';
 import { procLink, useStore } from '../store';
-import { addProcessMovement, completeProcessDeadline, createProcessDeadline, getProcessByNumber, setProcessStatus, syncDataJudMovements, updateProcess } from '../lib/processes';
-import { downloadDocument, listDocumentsForCase } from '../lib/documents';
+import { addProcessMovement, completeProcessDeadline, createProcessDeadline, deleteProcess, getProcessByNumber, setProcessStatus, syncDataJudFullData, updateProcess } from '../lib/processes';
+import { downloadDocument, listDocumentsForCase, seedDemoDocuments } from '../lib/documents';
 import { consultarDataJud, DataJudError, type DataJudResult } from '../lib/datajud';
+import { buildGoogleCalendarUrl, downloadIcsFile } from '../lib/calendarIntegration';
 import { type AIResult, useAI } from '../ai';
 import { AREAS, diasAte, type Prioridade } from '../data';
 
@@ -61,7 +65,9 @@ export function ProcessoDetalhe() {
   const tab = TABS.includes(sp.get('tab') ?? '') ? sp.get('tab')! : 'Resumo';
   const item = sp.get('item');
   const setTab = (t: string) => setSp({ tab: t }, { replace: true });
-  const [modal, setModal] = useState<null | 'editar' | 'mov' | 'prazo' | 'encerrar'>(null);
+  const [modal, setModal] = useState<null | 'editar' | 'mov' | 'prazo' | 'encerrar' | 'excluir'>(null);
+  const navigate = useNavigate();
+  const [deleting, setDeleting] = useState(false);
   const [newHearingOpen, setNewHearingOpen] = useState(false);
   const [proc, setProc] = useState<Proc | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,6 +94,22 @@ export function ProcessoDetalhe() {
   if (loading) return <div className="mx-auto max-w-[1400px] px-5 py-12 text-center text-sm text-muted">A carregar o processo…</div>;
   if (loadError) return <div className="mx-auto max-w-[1400px] px-5 py-12"><Card className="p-8 text-center text-sm text-muted">Não foi possível carregar o processo desta conta. Verifique a ligação e tente novamente.<div className="mt-3"><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>Tentar novamente</Button></div></Card></div>;
   if (!proc) return <Navigate to="/processos" replace />;
+  const handleDeleteProcess = async () => {
+    if (!proc?.id || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteProcess(proc.id);
+      setModal(null);
+      void refreshWorkspace(user.id).catch(() => undefined);
+      toast({ tone: 'success', message: 'Processo excluído com sucesso.' });
+      navigate('/processos', { replace: true });
+    } catch (error) {
+      console.error('Erro exclusao processo:', error);
+      const detail = error instanceof Error ? error.message : JSON.stringify(error);
+      toast({ tone: 'error', message: `Não foi possível excluir o processo (${detail}).` });
+      setDeleting(false);
+    }
+  };
   const changeStatus = async (archived: boolean) => {
     try {
       await setProcessStatus(proc.numero, 'encerrado', archived, archived ? 'Processo encerrado e arquivado.' : 'Processo encerrado.');
@@ -116,13 +138,25 @@ export function ProcessoDetalhe() {
     setDataJudError(null);
       try {
         const result = await consultarDataJud(proc.id);
-      const imported = result.found ? await syncDataJudMovements(proc.id, result.movements) : 0;
-      setDataJud({ result, consultedAt: new Date().toLocaleString('pt-BR') });
-      if (imported > 0) setReload((value) => value + 1);
-      toast({ tone: 'success', message: result.found
-        ? imported > 0 ? `${imported} nova(s) movimentação(ões) importada(s) do DataJud.` : 'DataJud consultado; não há movimentações novas.'
-        : 'O DataJud não encontrou correspondência pública.' });
-    } catch (error) {
+        const { movementsCount, partiesCount } = result.found
+          ? await syncDataJudFullData(proc.id, result.movements, result.parties)
+          : { movementsCount: 0, partiesCount: 0 };
+        if (result.found && result.documents && result.documents.length > 0) {
+          await seedDemoDocuments(proc.numero, result.documents);
+        }
+        setDataJud({ result, consultedAt: new Date().toLocaleString('pt-BR') });
+        if (movementsCount > 0 || partiesCount > 0 || (result.documents && result.documents.length > 0)) {
+          setReload((value) => value + 1);
+        }
+        toast({
+          tone: 'success',
+          message: result.found
+            ? result.isDemoFallback
+              ? `Dados demonstrativos carregados com sucesso (${movementsCount} mov., ${partiesCount} partes).`
+              : `${movementsCount} nova(s) movimentação(ões) importada(s) do DataJud.`
+            : 'O DataJud não encontrou correspondência pública.',
+        });
+      } catch (error) {
       const message = error instanceof DataJudError ? error.message : 'Não foi possível consultar o DataJud.';
       setDataJudError(message);
       toast({ tone: 'error', message });
@@ -189,6 +223,9 @@ export function ProcessoDetalhe() {
               Encerrar
             </Button>
           ) : null}
+          <Button variant="ghost" className="text-danger hover:bg-danger/10 hover:text-danger" icon={<Trash2 size={16} />} onClick={() => setModal('excluir')}>
+            Excluir
+          </Button>
         </div>
       </div>
 
@@ -262,6 +299,25 @@ export function ProcessoDetalhe() {
       />
       {modal === 'editar' && <EditarProcesso proc={proc} onClose={() => setModal(null)} onSaved={() => { setReload((value) => value + 1); void refreshWorkspace(user.id).catch(() => toast({ tone: 'error', message: 'Processo salvo, mas a conta não pôde ser atualizada.' })); }} />}
       <NovoEventoModal open={newHearingOpen} numero={proc.numero} tipoInicial="audiencia" onClose={() => { setNewHearingOpen(false); setReload((value) => value + 1); }} />
+
+      <Modal
+        open={modal === 'excluir'}
+        onClose={() => setModal(null)}
+        title="Excluir processo"
+        description="Esta ação removerá este processo e todos os seus registros associados (movimentações, prazos e audiências). Tem a certeza?"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" disabled={deleting} onClick={() => setModal(null)}>Cancelar</Button>
+            <Button variant="primary" loading={deleting} disabled={deleting} className="bg-danger hover:bg-danger/90" onClick={() => void handleDeleteProcess()}>
+              Excluir definitivamente
+            </Button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-muted">
+          O processo <strong className="text-ink">{proc.numero}</strong> será permanentemente excluído da sua conta.
+        </p>
+      </Modal>
 
       <Modal
         open={modal === 'encerrar'}
@@ -614,7 +670,12 @@ function TimelineTab({ proc, item }: { proc: Proc; item: string | null }) {
               <div className={cx('-mx-2 mb-2 min-w-0 rounded-md px-2 pb-4', hl(item === t.id))}>
                 <p className="flex flex-wrap items-center gap-2 text-[14px] font-semibold leading-tight text-ink">
                   {t.tipo}
-                  {t.origem === 'datajud' && <span className="rounded bg-teal/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-teal">CNJ · DataJud</span>}
+                  {t.origem === 'datajud' && (
+                    <>
+                      <span className="rounded bg-teal/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-teal">CNJ · DataJud</span>
+                      <span className="rounded bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Demonstração TPU</span>
+                    </>
+                  )}
                 </p>
                 <p className="mt-1 text-[13px] leading-relaxed text-muted">{t.descricao}</p>
                 <p className="mt-1.5 text-[12px] text-[var(--color-faint)]">{t.autor}{t.data.includes(' · ') && ` · ${t.data.split(' · ')[1]}`}</p>
@@ -643,18 +704,28 @@ function PartesTab({ proc }: { proc: Proc }) {
     return <Card className="p-10 text-center text-sm text-muted">Nenhuma parte cadastrada.</Card>;
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      {proc.partes.map((p) => (
-        <Card key={p.id} className="p-5">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-ink">{p.nome}</h3>
-            <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">{p.papel}</span>
-          </div>
-          <dl className="mt-3 space-y-2 text-sm">
-            <Row t="Documento" v={p.doc} />
-            <Row t="Representação" v={p.rep} />
-          </dl>
-        </Card>
-      ))}
+      {proc.partes.map((p) => {
+        const isDemo = p.rep?.includes('Dr. Marcos Silveira') || p.rep?.includes('Dra. Fernanda Albuquerque') || p.nome.includes('Carlos Alberto Ferreira') || p.nome.includes('Banco Horizonte');
+        return (
+          <Card key={p.id} className="p-5">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-ink">{p.nome}</h3>
+              <div className="flex items-center gap-1.5">
+                {isDemo && (
+                  <span className="rounded bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                    Demonstração
+                  </span>
+                )}
+                <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">{p.papel}</span>
+              </div>
+            </div>
+            <dl className="mt-3 space-y-2 text-sm">
+              <Row t="Documento" v={p.doc} />
+              <Row t="Representação" v={p.rep} />
+            </dl>
+          </Card>
+        );
+      })}
     </div>
   );
 }
@@ -782,14 +853,47 @@ function PrazosTab({ proc, item, onAdd, onComplete }: { proc: Proc; item: string
                       <StatusBadge tone={p.status} />
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      {p.status !== 'concluido' && can('gerenciarPrazos') && (
-                        <button
-                          onClick={() => { void onComplete(p.id); }}
-                          className="inline-flex items-center gap-1 text-[13px] font-medium text-teal hover:underline"
+                      <div className="flex items-center justify-end gap-2">
+                        {p.status !== 'concluido' && can('gerenciarPrazos') && (
+                          <button
+                            onClick={() => { void onComplete(p.id); }}
+                            className="inline-flex items-center gap-1 text-[13px] font-medium text-teal hover:underline"
+                          >
+                            <CheckCircle2 size={14} /> Concluir
+                          </button>
+                        )}
+                        <a
+                          href={buildGoogleCalendarUrl({
+                            title: `Prazo: ${p.descricao} (${proc.numero})`,
+                            description: `Processo: ${proc.numero}\nCliente: ${proc.cliente}\nResponsável: ${p.responsavel}\nPrioridade: ${p.prioridade}`,
+                            startDate: p.data,
+                            allDay: true,
+                          })}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-[12px] font-medium text-slate-600 hover:text-[var(--color-teal)]"
+                          title="Adicionar ao Google Agenda"
                         >
-                          <CheckCircle2 size={14} /> Concluir
+                          <ExternalLink size={12} /> Google Agenda
+                        </a>
+                        <button
+                          onClick={() =>
+                            downloadIcsFile(
+                              {
+                                title: `Prazo: ${p.descricao} (${proc.numero})`,
+                                description: `Processo: ${proc.numero}\nCliente: ${proc.cliente}\nResponsável: ${p.responsavel}`,
+                                startDate: p.data,
+                                allDay: true,
+                              },
+                              `prazo-${p.id}.ics`,
+                            )
+                          }
+                          className="text-[12px] text-muted hover:text-ink hover:underline"
+                          title="Baixar arquivo de calendário (.ics)"
+                        >
+                          .ics
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -834,6 +938,41 @@ function AudienciasTab({ proc, item, onAdd }: { proc: Proc; item: string | null;
                 {a.responsavel && <Row t="Responsável" v={a.responsavel} />}
                 {a.observacoes && <Row t="Observações" v={a.observacoes} />}
               </dl>
+              <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line/60 pt-3">
+                <a
+                  href={buildGoogleCalendarUrl({
+                    title: `Audiência: ${a.tipo} (${proc.numero})`,
+                    description: `Processo: ${proc.numero}\nCliente: ${proc.cliente}\nModalidade: ${a.modalidade}\nLocal/Link: ${a.local}\nParticipantes: ${a.participantes ?? ''}`,
+                    location: a.local,
+                    startDate: a.data,
+                    allDay: !a.data.includes('T') && !a.data.includes(':'),
+                  })}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-slate-600 hover:text-[var(--color-teal)]"
+                  title="Adicionar ao Google Agenda"
+                >
+                  <ExternalLink size={12} /> Google Agenda
+                </a>
+                <button
+                  onClick={() =>
+                    downloadIcsFile(
+                      {
+                        title: `Audiência: ${a.tipo} (${proc.numero})`,
+                        description: `Processo: ${proc.numero}\nCliente: ${proc.cliente}\nModalidade: ${a.modalidade}\nLocal/Link: ${a.local}`,
+                        location: a.local,
+                        startDate: a.data,
+                        allDay: !a.data.includes('T') && !a.data.includes(':'),
+                      },
+                      `audiencia-${a.id}.ics`,
+                    )
+                  }
+                  className="text-[12px] text-muted hover:text-ink hover:underline"
+                  title="Baixar arquivo de calendário (.ics)"
+                >
+                  Exportar .ics
+                </button>
+              </div>
             </Card>
           ))}
         </div>
