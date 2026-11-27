@@ -2,7 +2,7 @@ import type { Audiencia, Modalidade, Movimentacao, Parte, Prioridade, Processo, 
 import { toneOf } from '../data';
 import type { StatusTone } from '../components/ui';
 import { supabase } from './supabase';
-import type { DataJudMovement } from './datajud';
+import type { DataJudMovement, DataJudParty, DataJudDocument } from './datajud';
 
 type ProcessRow = {
   id: string;
@@ -294,6 +294,19 @@ export async function updateProcess(
   if (!data) throw new Error('Processo não encontrado nesta conta.');
 }
 
+export async function deleteProcess(processId: string): Promise<void> {
+  const client = db();
+  const { data, error } = await client.functions.invoke('delete-process', {
+    body: { processId },
+  });
+  if (error) {
+    throw new Error(error.message || 'Falha ao excluir processo.');
+  }
+  if (!data?.ok) {
+    throw new Error(data?.error || 'Não foi possível concluir a exclusão.');
+  }
+}
+
 export async function addProcessMovement(
   caseNumber: string,
   movement: { tipo: string; descricao: string },
@@ -418,4 +431,49 @@ export async function syncDataJudMovements(processId: string, movements: DataJud
   const { error } = await client.from('process_movements').insert(rows);
   if (error) throw error;
   return rows.length;
+}
+
+export async function syncDataJudFullData(
+  processId: string,
+  movements: DataJudMovement[],
+  parties?: DataJudParty[],
+  _documents?: DataJudDocument[],
+): Promise<{ movementsCount: number; partiesCount: number; docsCount: number }> {
+  const client = db();
+  const user = await getCurrentUser();
+  const { data: process, error: processError } = await client.from('processes')
+    .select('id').eq('owner_id', user.id).eq('id', processId).maybeSingle();
+  if (processError) throw processError;
+  if (!process) throw new Error('Processo não encontrado nesta conta.');
+
+  // 1. Sincronizar Movimentações
+  const movementsCount = await syncDataJudMovements(processId, movements);
+
+  // 2. Sincronizar Partes / Polos (Autor, Réu, Advogados)
+  let partiesCount = 0;
+  if (parties && parties.length > 0) {
+    try {
+      const { data: existingParties } = await client.from('process_parties')
+        .select('name, role').eq('owner_id', user.id).eq('process_id', processId);
+      const existingPSet = new Set((existingParties ?? []).map((p) => `${p.name}|${p.role}`));
+      const partyRows = parties
+        .filter((p) => !existingPSet.has(`${p.name}|${p.role}`))
+        .map((p) => ({
+          owner_id: user.id,
+          process_id: processId,
+          name: p.name,
+          role: p.role,
+          document: p.document ?? '-',
+          representative: p.representative ?? '',
+        }));
+      if (partyRows.length > 0) {
+        const { error: pErr } = await client.from('process_parties').insert(partyRows);
+        if (!pErr) partiesCount = partyRows.length;
+      }
+    } catch {
+      // Ignora erro opcional de sincronização de partes para não interromper a consulta
+    }
+  }
+
+  return { movementsCount, partiesCount, docsCount: 0 };
 }
