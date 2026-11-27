@@ -48,16 +48,19 @@ export async function askGemini(question: string, context?: GeminiContext): Prom
 
   if (error) {
     let code = '';
+    let detail = '';
     const response = (error as { context?: unknown }).context;
     if (response instanceof Response) {
       try {
-        const payload = await response.clone().json() as GeminiResponse;
+        const payload = await response.clone().json() as GeminiResponse & { detail?: string };
         if (typeof payload.error === 'string') code = payload.error;
+        if (typeof payload.detail === 'string') detail = payload.detail;
       } catch {
         // Use the generic message when the response is not JSON.
       }
     }
-    throw new Error(ERROR_MESSAGES[code] ?? 'Não foi possível consultar o Gemini. Verifique a conexão e tente novamente.');
+    const baseMsg = ERROR_MESSAGES[code] ?? 'Não foi possível consultar o Gemini. Verifique a conexão e tente novamente.';
+    throw new Error(detail ? `${baseMsg} (Detalhe do Google: ${detail})` : baseMsg);
   }
 
   if (typeof data?.answer !== 'string' || !data.answer.trim()) {

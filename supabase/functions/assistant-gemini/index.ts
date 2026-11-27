@@ -10,7 +10,7 @@ const corsHeaders = {
 const MAX_QUESTION_LENGTH = 4_000;
 const MAX_CONTEXT_LENGTH = 60_000;
 const MAX_REQUEST_BYTES = 250_000;
-const MODEL = "gemini-3.8-flash";
+const MODEL = "gemini-2.5-flash";
 const SYSTEM_INSTRUCTION = [
   "Você é o assistente do JurisCore, um aplicativo de gestão jurídica brasileiro.",
   "Responda sempre em português brasileiro, com clareza e concisão.",
@@ -214,9 +214,11 @@ Deno.serve(async (request: Request) => {
     };
 
     if (!response.ok) {
+      console.error("Gemini API error:", response.status, JSON.stringify(result));
       if (response.status === 429) return json({ error: "rate_limited" }, 429);
       if (response.status >= 500) return json({ error: "provider_unavailable" }, 503);
-      return json({ error: "provider_rejected_request" }, 502);
+      const detail = (result as { error?: { message?: string } })?.error?.message;
+      return json({ error: "provider_rejected_request", detail }, 502);
     }
 
     const answer = result.candidates?.[0]?.content?.parts

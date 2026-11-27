@@ -801,6 +801,17 @@ export function useAI() {
       const xs = clientes.map((c) => ({ c, n: processos.filter((p) => p.clienteId === c.id).length })).filter((x) => x.n).sort((a, b) => b.n - a.n).slice(0, 4);
       return R({ text: 'Clientes com mais processos nos seus registros:', lines: xs.map((x) => `${x.c.nome} · ${plural(x.n, 'processo')}`), sources: xs.map((x) => ({ kind: 'cliente' as const, label: `Cliente ${x.c.nome}`, to: `/clientes/${x.c.id}` })) });
     }
+    if (/quais.*clientes|meus clientes|lista.*clientes|todos.*clientes/.test(q)) {
+      if (!clientes.length) return R({ kind: 'sem-resultado', text: 'Nenhum cliente cadastrado no momento.' });
+      return R({
+        text: `Você possui ${plural(clientes.length, 'cliente cadastrado', 'clientes cadastrados')} nos seus registros:`,
+        lines: clientes.map((c) => {
+          const procs = processos.filter((p) => p.clienteId === c.id).length;
+          return `${c.nome} · ${c.documento || 'Documento não informado'} (${plural(procs, 'processo')})`;
+        }),
+        sources: clientes.slice(0, 6).map((c) => ({ kind: 'cliente' as const, label: `Cliente ${c.nome}`, to: `/clientes/${c.id}` })),
+      });
+    }
     return globalSearch(question);
   }
 
