@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Gavel, ListChecks, Plus, Sparkles, X } from 'lucide-react';
+import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Gavel, ListChecks, Plus, Sparkles, X } from 'lucide-react';
 import { Button, Card, Segmented, Select, StatusBadge, cx, useToast } from '../components/ui';
 import { AreaTag } from '../components/Areas';
 import { type EventoTipo, NovoEventoModal } from '../components/NovoEventoModal';
@@ -10,6 +10,7 @@ import { procLink, useStore } from '../store';
 import { diasAte, hojeZero, parseData } from '../data';
 import { completeProcessDeadline } from '../lib/processes';
 import { setCalendarAppointmentStatus, setProcessHearingStatus } from '../lib/schedule';
+import { buildGoogleCalendarUrl, downloadIcsFile } from '../lib/calendarIntegration';
 
 type Kind = 'prazo' | 'audiencia' | 'tarefa' | 'compromisso';
 type Item = {
@@ -391,14 +392,47 @@ function ItemBody({ i, compact, onDone, onCancel, busy }: { i: Item; compact?: b
           </p>
         )}
         {!compact && (i.kind === 'prazo' && i.status !== 'concluido' || (i.kind === 'audiencia' || i.kind === 'compromisso') && i.status !== 'concluido') && (
-          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+          <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-line/60 pt-1.5">
             {(i.kind === 'prazo' || i.kind === 'audiencia' || i.kind === 'compromisso') && (
               <button disabled={busy} onClick={onDone} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-[var(--color-teal)] hover:underline disabled:opacity-50">
                 <CheckCircle2 size={13} /> {i.kind === 'prazo' ? 'Concluir prazo' : i.kind === 'audiencia' ? 'Marcar realizada' : 'Concluir compromisso'}
               </button>
             )}
+            <a
+              href={buildGoogleCalendarUrl({
+                title: `${KINDS[i.kind].label}: ${i.titulo}${i.cliente ? ` (${i.cliente})` : ''}`,
+                description: `Processo: ${i.numero ?? 'Geral'}\nCliente: ${i.cliente ?? 'Não informado'}\nResponsável: ${i.responsavel}\nDetalhes: ${i.detalhe ?? ''}`,
+                location: i.detalhe ?? '',
+                startDate: i.d,
+                allDay: !i.hora,
+              })}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[12px] font-medium text-slate-600 hover:text-[var(--color-teal)]"
+              title="Adicionar ao Google Agenda"
+            >
+              <ExternalLink size={12} /> Google Agenda
+            </a>
+            <button
+              onClick={() =>
+                downloadIcsFile(
+                  {
+                    title: `${KINDS[i.kind].label}: ${i.titulo}`,
+                    description: `Processo: ${i.numero ?? 'Geral'}\nCliente: ${i.cliente ?? ''}\nResponsável: ${i.responsavel}`,
+                    location: i.detalhe ?? '',
+                    startDate: i.d,
+                    allDay: !i.hora,
+                  },
+                  `${i.kind}-${i.id}.ics`,
+                )
+              }
+              className="text-[12px] text-muted hover:text-ink hover:underline"
+              title="Baixar arquivo de calendário (.ics)"
+            >
+              Exportar .ics
+            </button>
             {(i.kind === 'audiencia' || i.kind === 'compromisso') && (
-              <button disabled={busy} onClick={onCancel} className="text-[12.5px] font-medium text-danger hover:underline disabled:opacity-50">Cancelar</button>
+              <button disabled={busy} onClick={onCancel} className="text-[12px] font-medium text-danger hover:underline disabled:opacity-50">Cancelar</button>
             )}
           </div>
         )}
