@@ -44,7 +44,13 @@ export function buildSearchPayload(caseNumber) {
       'movimentos.codigo', 'movimentos.nome', 'movimentos.dataHora',
       'movimentos.complementosTabelados', 'movimentos.orgaoJulgador.nomeOrgao',
     ],
-    query: { match: { numeroProcesso: caseNumber } },
+    query: {
+      bool: {
+        filter: [
+          { term: { "numeroProcesso.keyword": caseNumber } }
+        ]
+      }
+    },
   };
 }
 

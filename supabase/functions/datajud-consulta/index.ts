@@ -5,6 +5,7 @@ import { DataJudServiceError, queryDataJud } from './datajud-service.mjs';
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://juriscore-demo.vercel.app',
   'http://localhost:5173',
+  'http://localhost:8443',
 ];
 const REQUEST_BODY_LIMIT = 2048;
 

@@ -151,6 +151,47 @@ export async function listDocumentsForCase(caseNumber: string): Promise<Document
   return documents.map(({ numero: _numero, cliente: _cliente, processId: _processId, mimeType: _mimeType, sizeBytes: _sizeBytes, ...document }) => document);
 }
 
+export async function seedDemoDocuments(caseNumber: string, processId: string, documents: Array<{ name: string; type: string; content: string }>): Promise<number> {
+  const client = db();
+  const user = await getCurrentUser();
+  
+  const { data: existing } = await client.from('process_documents')
+    .select('file_name').eq('owner_id', user.id).eq('process_id', processId);
+  const existingSet = new Set((existing ?? []).map((d) => d.file_name));
+
+  let count = 0;
+  for (const doc of documents) {
+    const fileName = `${doc.name}.txt`;
+    if (existingSet.has(fileName)) continue;
+
+    const objectPath = `${user.id}/${processId}/demo_${Date.now()}_${encodeURIComponent(fileName)}`;
+    const fileBytes = new TextEncoder().encode(doc.content);
+
+    // Salvar o arquivo no bucket de Storage
+    const { error: storageErr } = await client.storage
+      .from(BUCKET)
+      .upload(objectPath, fileBytes, { contentType: 'text/plain; charset=utf-8', upsert: true });
+
+    if (!storageErr) {
+      const { error: dbErr } = await client.from('process_documents').insert({
+        owner_id: user.id,
+        process_id: processId,
+        object_path: objectPath,
+        file_name: fileName,
+        document_type: doc.type,
+        mime_type: 'text/plain',
+        size_bytes: fileBytes.length,
+      });
+      if (!dbErr) {
+        existingSet.add(fileName);
+        count++;
+      }
+    }
+  }
+
+  return count;
+}
+
 export async function uploadDocument(input: {
   caseNumber: string;
   file: File;
